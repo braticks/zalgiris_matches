@@ -1,6 +1,6 @@
 # Žalgiris Matches (Home Assistant)
 
-Custom Home Assistant integracija, kuri iš `https://zalgiris.lt/rungtynes` ištraukia informaciją apie artėjančias / live / praėjusias rungtynes.
+Custom HA integracija, kuri iš `https://zalgiris.lt/rungtynes` ištraukia informaciją apie artėjančias / live / praėjusias rungtynes.
 
 ## Diegimas per HACS (Custom repository)
 
@@ -12,16 +12,15 @@ Custom Home Assistant integracija, kuri iš `https://zalgiris.lt/rungtynes` išt
 
 ## Konfigūracija
 
-Po įdiegimo:
 Settings → Devices & Services → Add integration → **Žalgiris Matches**
 
 Options leidžia pakeisti:
-- `scan_interval` (pvz. 600s)
-- `live_scan_interval` (pvz. 20s)
-- `store_days` (kiek dienų laikyti istoriją)
+- `scan_interval` (sek.)
+- `live_scan_interval` (sek.)
+- `store_days` (dienomis)
 
 ## Entitetai
 
-- `sensor.zalgiris_rungtyniu_sarasas`
-- `sensor.zalgiris_kitos_rungtynes`
-- `sensor.zalgiris_paskutines_rungtynes_su_rezultatu`
+- `sensor.zalgiris_rungtyniu_sarasas` – upcoming/finished/live + `fetched_at`
+- `sensor.zalgiris_kitos_rungtynes` – kitos rungtynės (timestamp) + atributai
+- `sensor.zalgiris_paskutines_rungtynes_su_rezultatu` – paskutinės (kai pavyksta gauti rezultatą)

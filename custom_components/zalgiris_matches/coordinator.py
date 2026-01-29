@@ -352,15 +352,74 @@ class ZalgirisMatchesCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
         }
         return game_ids, debug
 
-    def _extract_match_window(self, html: str, game_id: str, size: int = 6000) -> str:
-        # Find the first occurrence of this id inside a /rungtynes/... link
-        m = re.search(r"/rungtynes/%s" % re.escape(game_id), html, re.IGNORECASE)
-        idx = m.start() if m else html.find(game_id)
-        if idx < 0:
-            idx = 0
-        start = max(0, idx - size // 2)
-        end = min(len(html), idx + size // 2)
-        return html[start:end]
+    
+    def _extract_match_windows(self, html: str, game_id: str, size: int = 12000, max_windows: int = 6) -> List[str]:
+        """Return several candidate windows around occurrences of a game id.
+
+        Žalgiris page can contain the same /rungtynes/<id> many times (buttons, menus, etc.).
+        The first occurrence is not guaranteed to be close to the date/teams JSON, so we try
+        multiple windows and later pick the best parse.
+        """
+        indices: List[int] = []
+
+        # Prefer occurrences inside /rungtynes/<id> links
+        for mm in re.finditer(r"/rungtynes/%s" % re.escape(game_id), html, re.IGNORECASE):
+            indices.append(mm.start())
+            if len(indices) >= max_windows:
+                break
+
+        # Fallback: raw id
+        if not indices:
+            for mm in re.finditer(re.escape(game_id), html):
+                indices.append(mm.start())
+                if len(indices) >= max_windows:
+                    break
+
+        windows: List[str] = []
+        for idx in indices:
+            start = max(0, idx - size // 2)
+            end = min(len(html), idx + size // 2)
+            windows.append(html[start:end])
+
+        # At least one window
+        if not windows:
+            windows.append(html[:size])
+
+        return windows
+
+    def _parse_match_best(self, html: str, game_id: str) -> Dict[str, Any]:
+        """Try multiple candidate windows and return the best parsed match."""
+        best: Dict[str, Any] = {"game_id": game_id}
+        best_score = -1
+
+        for window in self._extract_match_windows(html, game_id):
+            parsed = self._parse_match_from_window(game_id, window)
+
+            score = 0
+            if parsed.get("start"):
+                score += 20
+            if parsed.get("home") or parsed.get("away"):
+                score += 5
+            if parsed.get("home_logo") or parsed.get("away_logo"):
+                score += 2
+            if parsed.get("tv"):
+                score += 1
+            if parsed.get("league"):
+                score += 1
+            if parsed.get("tickets_url"):
+                score += 1
+
+            if score > best_score:
+                best = parsed
+                best_score = score
+
+            # If we already have start + teams, good enough
+            if parsed.get("start") and (parsed.get("home") or parsed.get("away")):
+                best = parsed
+                break
+
+        return best
+
 
     def _parse_match_from_window(self, game_id: str, window: str) -> Dict[str, Any]:
         start_dt = _parse_start(window)
@@ -435,8 +494,8 @@ class ZalgirisMatchesCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
                 if has_score or (start_dt > now - timedelta(hours=6)):
                     finished.append(g)
 
-        upcoming.sort(key=lambda x: x.get("start") or "")
-        finished.sort(key=lambda x: x.get("start") or "", reverse=True)
+        upcoming.sort(key=lambda x: dt_util.parse_datetime(x.get("start") or "") or (dt_util.utcnow() + timedelta(days=3650)))
+        finished.sort(key=lambda x: dt_util.parse_datetime(x.get("start") or "") or dt_util.utcnow(), reverse=True)
         return live, upcoming, finished
 
     async def _async_update_data(self) -> Dict[str, Any]:
@@ -454,8 +513,7 @@ class ZalgirisMatchesCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
 
         # Parse schedule matches
         for gid in game_ids:
-            window = self._extract_match_window(html, gid)
-            parsed = self._parse_match_from_window(gid, window)
+            parsed = self._parse_match_best(html, gid)
 
             # Merge into cache
             existing = self._games.get(gid, {})
@@ -472,6 +530,24 @@ class ZalgirisMatchesCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
             self._games[gid] = merged
 
         live, upcoming, finished = self._classify()
+
+        # Opportunistically enrich the nearest upcoming game (low-frequency) so UI can show TV/arena/logos.
+        # Do this only if the game is soon and we haven't fetched details recently.
+        if upcoming:
+            try:
+                g0 = upcoming[0]
+                start0 = dt_util.parse_datetime(g0.get("start") or "")
+                if start0:
+                    soon = start0 - _now() <= timedelta(days=14)
+                    last_fetch = g0.get("_details_fetched_at")
+                    last_fetch_dt = dt_util.parse_datetime(last_fetch) if isinstance(last_fetch, str) else None
+                    stale = (last_fetch_dt is None) or (_now() - last_fetch_dt >= timedelta(hours=6))
+                    needs = (g0.get("arena") in (None, "", "—", "-")) or (g0.get("tv") in (None, "", "—", "-")) or (g0.get("home") is None) or (g0.get("away") is None)
+                    if soon and stale and needs:
+                        await self._maybe_fetch_match_details(g0)
+                        g0["_details_fetched_at"] = _serialize_dt(_now())
+            except Exception:  # pragma: no cover
+                pass
 
         # If we have a live game or a just-started game, poll its match page more often
         detail_tasks = []
@@ -501,6 +577,24 @@ class ZalgirisMatchesCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
 
             # Re-classify after details update
             live, upcoming, finished = self._classify()
+
+        # Opportunistically enrich the nearest upcoming game (low-frequency) so UI can show TV/arena/logos.
+        # Do this only if the game is soon and we haven't fetched details recently.
+        if upcoming:
+            try:
+                g0 = upcoming[0]
+                start0 = dt_util.parse_datetime(g0.get("start") or "")
+                if start0:
+                    soon = start0 - _now() <= timedelta(days=14)
+                    last_fetch = g0.get("_details_fetched_at")
+                    last_fetch_dt = dt_util.parse_datetime(last_fetch) if isinstance(last_fetch, str) else None
+                    stale = (last_fetch_dt is None) or (_now() - last_fetch_dt >= timedelta(hours=6))
+                    needs = (g0.get("arena") in (None, "", "—", "-")) or (g0.get("tv") in (None, "", "—", "-")) or (g0.get("home") is None) or (g0.get("away") is None)
+                    if soon and stale and needs:
+                        await self._maybe_fetch_match_details(g0)
+                        g0["_details_fetched_at"] = _serialize_dt(_now())
+            except Exception:  # pragma: no cover
+                pass
 
         # Save store occasionally (not every tick)
         try:
