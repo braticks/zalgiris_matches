@@ -53,8 +53,7 @@ class ZalgirisMatchesConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 class ZalgirisMatchesOptionsFlow(config_entries.OptionsFlow):
     def __init__(self, config_entry):
-        self.config_entry = config_entry
-
+        super().__init__(config_entry)
     async def async_step_init(self, user_input=None):
         if user_input is None:
             opts = {**self.config_entry.data, **self.config_entry.options}
