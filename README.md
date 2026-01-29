@@ -1,25 +1,27 @@
-# Žalgiris Matches (Home Assistant custom integration)
+# Žalgiris Matches (Home Assistant)
 
-Ši integracija parsiunčia rungtynių informaciją iš **https://zalgiris.lt/rungtynes** ir sukuria sensorius:
+Custom Home Assistant integracija, kuri iš `https://zalgiris.lt/rungtynes` ištraukia informaciją apie artėjančias / live / praėjusias rungtynes.
 
-- **Žalgiris – rungtynių sąrašas** (state = kiek rungtynių žinome)
-  - atributai: `live`, `upcoming`, `finished`, `fetched_at` ir t.t.
-- **Žalgiris – kitos rungtynės** (timestamp)
-- **Žalgiris – paskutinės rungtynės** (timestamp)
-- **Žalgiris – paskutinės rungtynės (su rezultatu)** (timestamp)
-- **Žalgiris – live rungtynės** (state = `live` / `85-72` / `none`)
+## Diegimas per HACS (Custom repository)
 
-## Kodėl „finished“ gali būti tuščias?
-`zalgiris.lt/rungtynes` dažnai rodo tik artėjančias rungtynes. Kai rungtynės būna matomos puslapyje (tą pačią dieną),
-integracija jas įsimena lokaliai (HA saugykloje) ir rodo kaip `finished` ateityje.
+1. HACS → **Integrations**
+2. Viršuje dešinėje **⋮** → **Custom repositories**
+3. Įrašyk šio repo URL ir pasirink **Category: Integration**
+4. Susirask **Žalgiris Matches** ir paspausk **Download**
+5. Perkrauk Home Assistant
 
-## Atnaujinimo dažnis ir „ban“ rizika
-- `scan_interval` – kaip dažnai traukiamas pagrindinis tvarkaraštis (rekomenduojama 10 min).
-- `live_scan_interval` – kai aptinkamos live rungtynės, integracija persijungia į dažnesnį atnaujinimą (numatytai 20 sek).
+## Konfigūracija
 
-Integracija naudoja **ETag/If-Modified-Since** (kai serveris palaiko) – tai mažina realių duomenų parsisiuntimų skaičių.
+Po įdiegimo:
+Settings → Devices & Services → Add integration → **Žalgiris Matches**
 
-## Diegimas
-1. Išarchyvuok į `config/custom_components/zalgiris_matches/`
-2. Perkrauk Home Assistant.
-3. Settings → Devices & Services → **Add integration** → „Žalgiris Matches“.
+Options leidžia pakeisti:
+- `scan_interval` (pvz. 600s)
+- `live_scan_interval` (pvz. 20s)
+- `store_days` (kiek dienų laikyti istoriją)
+
+## Entitetai
+
+- `sensor.zalgiris_rungtyniu_sarasas`
+- `sensor.zalgiris_kitos_rungtynes`
+- `sensor.zalgiris_paskutines_rungtynes_su_rezultatu`
