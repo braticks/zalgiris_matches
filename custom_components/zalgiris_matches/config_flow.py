@@ -11,8 +11,6 @@ from .const import (
     DEFAULT_TEAM_PATH,
     CONF_SCAN_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
-    CONF_LIVE_SCAN_INTERVAL,
-    DEFAULT_LIVE_SCAN_INTERVAL,
     CONF_STORE_DAYS,
     DEFAULT_STORE_DAYS,
 )
@@ -28,9 +26,6 @@ class ZalgirisMatchesConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     vol.Optional(CONF_TEAM_PATH, default=DEFAULT_TEAM_PATH): str,
                     vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): vol.All(
                         vol.Coerce(int), vol.Range(min=60, max=3600)
-                    ),
-                    vol.Optional(CONF_LIVE_SCAN_INTERVAL, default=DEFAULT_LIVE_SCAN_INTERVAL): vol.All(
-                        vol.Coerce(int), vol.Range(min=5, max=120)
                     ),
                     vol.Optional(CONF_STORE_DAYS, default=DEFAULT_STORE_DAYS): vol.All(
                         vol.Coerce(int), vol.Range(min=1, max=365)
@@ -53,7 +48,8 @@ class ZalgirisMatchesConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 class ZalgirisMatchesOptionsFlow(config_entries.OptionsFlow):
     def __init__(self, config_entry):
-        super().__init__(config_entry)
+        self.config_entry = config_entry
+
     async def async_step_init(self, user_input=None):
         if user_input is None:
             opts = {**self.config_entry.data, **self.config_entry.options}
@@ -61,9 +57,6 @@ class ZalgirisMatchesOptionsFlow(config_entries.OptionsFlow):
                 {
                     vol.Optional(CONF_SCAN_INTERVAL, default=opts.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)): vol.All(
                         vol.Coerce(int), vol.Range(min=60, max=3600)
-                    ),
-                    vol.Optional(CONF_LIVE_SCAN_INTERVAL, default=opts.get(CONF_LIVE_SCAN_INTERVAL, DEFAULT_LIVE_SCAN_INTERVAL)): vol.All(
-                        vol.Coerce(int), vol.Range(min=5, max=120)
                     ),
                     vol.Optional(CONF_STORE_DAYS, default=opts.get(CONF_STORE_DAYS, DEFAULT_STORE_DAYS)): vol.All(
                         vol.Coerce(int), vol.Range(min=1, max=365)

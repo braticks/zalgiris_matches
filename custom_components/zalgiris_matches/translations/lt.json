@@ -2,13 +2,12 @@
   "config": {
     "step": {
       "user": {
-        "title": "Žalgiris Matches",
-        "description": "Sukuria sensorius iš zalgiris.lt rungtynių puslapio.",
+        "title": "Zalgiris Matches",
+        "description": "Sukuria sensorius is zalgiris.lt rungtyniu puslapio.",
         "data": {
-          "team_path": "Rungtynių puslapio kelias",
+          "team_path": "Rungtyniu puslapio kelias",
           "scan_interval": "Atnaujinimo intervalas (sek.)",
-          "live_scan_interval": "Live atnaujinimo intervalas (sek.)",
-          "store_days": "Kiek dienų saugoti istoriją"
+          "store_days": "Kiek dienu saugoti istorija"
         }
       }
     }
@@ -16,12 +15,11 @@
   "options": {
     "step": {
       "init": {
-        "title": "Žalgiris Matches nustatymai",
-        "description": "Keisk atnaujinimo intervalus ir istorijos saugojimą.",
+        "title": "Zalgiris Matches nustatymai",
+        "description": "Keisk atnaujinimo intervala ir istorijos saugojima.",
         "data": {
           "scan_interval": "Atnaujinimo intervalas (sek.)",
-          "live_scan_interval": "Live atnaujinimo intervalas (sek.)",
-          "store_days": "Kiek dienų saugoti istoriją"
+          "store_days": "Kiek dienu saugoti istorija"
         }
       }
     }

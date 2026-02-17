@@ -1,26 +1,48 @@
-# Žalgiris Matches (Home Assistant)
+# Zalgiris Matches (v2.0.3)
 
-Custom HA integracija, kuri iš `https://zalgiris.lt/rungtynes` ištraukia informaciją apie artėjančias / live / praėjusias rungtynes.
+Home Assistant custom integration, kuri sukuria 2 sensorius:
+- `schedule`
+- `next`
 
-## Diegimas per HACS (Custom repository)
+## Diegimas per HACS
 
-1. HACS → **Integrations**
-2. Viršuje dešinėje **⋮** → **Custom repositories**
-3. Įrašyk šio repo URL ir pasirink **Category: Integration**
-4. Susirask **Žalgiris Matches** ir paspausk **Download**
-5. Perkrauk Home Assistant
+1. Įkelk šitą repo į GitHub (pvz. `https://github.com/braticks/zalgiris_matches`).
+2. Home Assistant -> HACS -> `Integrations` -> trys taškai -> `Custom repositories`.
+3. Įklijuok repo URL.
+4. Pasirink `Category: Integration`.
+5. Surask `Zalgiris Matches` HACS sąraše ir `Download`.
+6. Perkrauk Home Assistant.
+7. `Settings -> Devices & Services -> Add Integration` ir pasirink `Zalgiris Matches`.
 
-## Konfigūracija
+## Rankinis diegimas
 
-Settings → Devices & Services → Add integration → **Žalgiris Matches**
+Nukopijuok katalogą:
 
-Options leidžia pakeisti:
-- `scan_interval` (sek.)
-- `live_scan_interval` (sek.)
-- `store_days` (dienomis)
+`custom_components/zalgiris_matches`
 
-## Entitetai
+į tavo Home Assistant:
 
-- `sensor.zalgiris_rungtyniu_sarasas` – upcoming/finished/live + `fetched_at`
-- `sensor.zalgiris_kitos_rungtynes` – kitos rungtynės (timestamp) + atributai
-- `sensor.zalgiris_paskutines_rungtynes_su_rezultatu` – paskutinės (kai pavyksta gauti rezultatą)
+`config/custom_components/zalgiris_matches`
+
+Po to restartuok Home Assistant ir pridėk integraciją per UI.
+
+## Repo struktūra (HACS)
+
+`custom_components/zalgiris_matches/`
+- `__init__.py`
+- `config_flow.py`
+- `const.py`
+- `coordinator.py`
+- `manifest.json`
+- `sensor.py`
+- `strings.json`
+- `translations/en.json`
+- `translations/lt.json`
+
+Papildomai root:
+- `hacs.json`
+- `README.md`
+
+## Versija
+
+`manifest.json` versija: `2.0.3`

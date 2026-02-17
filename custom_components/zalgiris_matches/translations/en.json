@@ -2,12 +2,11 @@
   "config": {
     "step": {
       "user": {
-        "title": "Žalgiris Matches",
-        "description": "Creates sensors from zalgiris.lt matches page.",
+        "title": "Zalgiris Matches",
+        "description": "Creates sensors from the zalgiris.lt matches page.",
         "data": {
           "team_path": "Matches page path",
           "scan_interval": "Refresh interval (sec.)",
-          "live_scan_interval": "Live refresh interval (sec.)",
           "store_days": "Keep history days"
         }
       }
@@ -16,11 +15,10 @@
   "options": {
     "step": {
       "init": {
-        "title": "Žalgiris Matches options",
-        "description": "Tune refresh intervals and history storage.",
+        "title": "Zalgiris Matches options",
+        "description": "Tune refresh interval and history storage.",
         "data": {
           "scan_interval": "Refresh interval (sec.)",
-          "live_scan_interval": "Live refresh interval (sec.)",
           "store_days": "Keep history days"
         }
       }

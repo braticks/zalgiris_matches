@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import html as html_lib
 import json
 import logging
 import re
@@ -19,11 +20,9 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     BASE_URL,
-    CONF_LIVE_SCAN_INTERVAL,
     CONF_SCAN_INTERVAL,
     CONF_STORE_DAYS,
     CONF_TEAM_PATH,
-    DEFAULT_LIVE_SCAN_INTERVAL,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_STORE_DAYS,
     DEFAULT_TEAM_PATH,
@@ -38,9 +37,13 @@ UUID_RE = re.compile(
     r"/rungtynes/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
     re.IGNORECASE,
 )
+UUID_ANY_RE = re.compile(
+    r"\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b",
+    re.IGNORECASE,
+)
 
 # e.g. "PN, 01-30, 21:30" (Lithuanian weekday abbreviations)
-START_RE = re.compile(r"([A-ZŠŽĮŪ]{1,3})\s*,\s*(\d{2})-(\d{2})\s*,\s*(\d{2}):(\d{2})")
+START_RE = re.compile(r"([A-Z]{1,3})\s*,\s*(\d{2})-(\d{2})\s*,\s*(\d{2}):(\d{2})")
 
 KOOBIN_RE = re.compile(r"https?://zalgiris\.koobin\.com[^\s\"<>]+", re.IGNORECASE)
 
@@ -54,12 +57,20 @@ SCORE_ESC_RE = re.compile(r"tabular-nums\\\",\\\"children\\\":\\\"([^\\\"]{1,3})
 
 TV_HTML_RE = re.compile(r"Transliacijos\s*</p>\s*<p[^>]*>([^<]{1,60})</p>", re.IGNORECASE)
 TV_ESC_RE = re.compile(r"Transliacijos\\\",\\\"children\\\":\\\"([^\\\"]{1,60})", re.IGNORECASE)
+LEAGUE_HTML_RE = re.compile(
+    r'(?:data-tooltip="|text-2xs truncate">)(Eurolyga|LKL|KMT|Lietuvos Krep[^<"]*Lyga|Karaliaus Mindaugo Taur[^<"]*)',
+    re.IGNORECASE,
+)
+LEAGUE_ESC_RE = re.compile(
+    r'(?:\\\"data-tooltip\\\":\\\"|text-2xs truncate\\\",\\\"children\\\":\\\")(Eurolyga|LKL|KMT|Lietuvos Krep[^\\"]*Lyga|Karaliaus Mindaugo Taur[^\\"]*)',
+    re.IGNORECASE,
+)
 
 # Common league names seen on the page (we pick the first match)
 KNOWN_LEAGUES = [
     "Eurolyga",
-    "Lietuvos Krepšinio Lyga",
-    "Karaliaus Mindaugo Taurė",
+    "Lietuvos Krep?inio Lyga",
+    "Karaliaus Mindaugo Taur?",
     "KMT",
     "LKL",
 ]
@@ -96,6 +107,17 @@ def _safe_unescape(s: str) -> str:
         .replace("&#x2F;", "/")
         .replace("&#47;", "/")
     )
+
+def _normalize_html_for_parsing(html: str) -> str:
+    """Normalize browser-saved page-source wrapper to plain parseable text."""
+    if "saved from url=" not in html or "class=\"line-content\"" not in html:
+        return html
+
+    # Browser save can wrap every source token into <span> blocks with escaped entities.
+    # Strip the wrapper markup and unescape entities so regex parsing works on real source text.
+    compact = re.sub(r"<[^>]+>", "", html)
+    return html_lib.unescape(compact)
+
 
 
 def _parse_teams_and_logos(window: str) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
@@ -165,8 +187,27 @@ def _parse_scores(window: str) -> Tuple[Optional[int], Optional[int]]:
 
 
 def _parse_league(window: str) -> Optional[str]:
+    m = LEAGUE_HTML_RE.search(window)
+    if not m:
+        m = LEAGUE_ESC_RE.search(window)
+    if m:
+        raw = m.group(1).strip()
+        low = raw.lower()
+        if "krep" in low and "lyga" in low:
+            return "Lietuvos Krepšinio Lyga"
+        if "mindaugo" in low:
+            return "Karaliaus Mindaugo Taurė"
+        if low == "lkl":
+            return "LKL"
+        if low == "kmt":
+            return "KMT"
+        if "eurolyga" in low:
+            return "Eurolyga"
+        return raw
+
+    window_l = window.lower()
     for lg in KNOWN_LEAGUES:
-        if lg in window:
+        if lg.lower() in window_l:
             return lg
     # Fallback: first small header line (HTML)
     m = re.search(r'text-white/60 text-2xs truncate[^>]*>([^<]{3,60})</p>', window)
@@ -221,12 +262,6 @@ def _parse_tickets_url(window: str) -> Optional[str]:
     return _safe_unescape(m.group(0))
 
 
-def _parse_live_flag(window: str) -> bool:
-    # The page can show LIVE/gyvai badge (varies). We keep it simple.
-    w = window.lower()
-    return ("live" in w) or ("gyvai" in w) or ("tiesiogiai" in w)
-
-
 def _serialize_dt(dt: Optional[dt_util.dt.datetime]) -> Optional[str]:
     if not dt:
         return None
@@ -259,10 +294,6 @@ class ZalgirisMatchesCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
 
     def _opt_scan_interval(self) -> int:
         val = self.entry.options.get(CONF_SCAN_INTERVAL, self.entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL))
-        return int(val)
-
-    def _opt_live_scan_interval(self) -> int:
-        val = self.entry.options.get(CONF_LIVE_SCAN_INTERVAL, self.entry.data.get(CONF_LIVE_SCAN_INTERVAL, DEFAULT_LIVE_SCAN_INTERVAL))
         return int(val)
 
     def _opt_store_days(self) -> int:
@@ -338,13 +369,21 @@ class ZalgirisMatchesCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
 
     def _parse_schedule(self, html: str) -> Tuple[List[str], Dict[str, Any]]:
         game_ids = []
-        for gid in UUID_RE.findall(html):
+        href_ids = UUID_RE.findall(html)
+        for gid in href_ids:
             if gid not in game_ids:
                 game_ids.append(gid)
 
+        parse_mode = "href"
+        if not game_ids:
+            parse_mode = "uuid_fallback"
+            for gid in UUID_ANY_RE.findall(html):
+                if gid not in game_ids:
+                    game_ids.append(gid)
+
         debug = {
-            "parse_mode": "href",
-            "links_found": len(UUID_RE.findall(html)),
+            "parse_mode": parse_mode,
+            "links_found": len(href_ids),
             "matches_found": len(game_ids),
             "has_rungtynes": "/rungtynes" in html,
             "has_uuid": bool(game_ids),
@@ -352,74 +391,41 @@ class ZalgirisMatchesCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
         }
         return game_ids, debug
 
-    
-    def _extract_match_windows(self, html: str, game_id: str, size: int = 12000, max_windows: int = 6) -> List[str]:
-        """Return several candidate windows around occurrences of a game id.
+    def _extract_match_window(self, html: str, game_id: str, size: int = 6000) -> str:
+        # Prefer direct match link anchors; they are the most stable for one-card context.
+        m = re.search(r"/rungtynes/%s\?tab=media" % re.escape(game_id), html, re.IGNORECASE)
+        if not m:
+            m = re.search(r"/rungtynes/%s" % re.escape(game_id), html, re.IGNORECASE)
+        if not m:
+            m = re.search(r"\"%s\"" % re.escape(game_id), html, re.IGNORECASE)
+        idx = m.start() if m else html.find(game_id)
+        if idx < 0:
+            idx = 0
 
-        Žalgiris page can contain the same /rungtynes/<id> many times (buttons, menus, etc.).
-        The first occurrence is not guaranteed to be close to the date/teams JSON, so we try
-        multiple windows and later pick the best parse.
-        """
-        indices: List[int] = []
+        # Try to isolate exactly one match card block around the anchor.
+        block_markers = [
+            'class="relative flex flex-col bg-gray-700 rounded lg:hidden"',
+            'className":"relative flex flex-col bg-gray-700 rounded lg:hidden"',
+        ]
+        card_start = -1
+        card_end = -1
+        for marker in block_markers:
+            s = html.rfind(marker, 0, idx)
+            if s >= 0 and s > card_start:
+                card_start = s
+        if card_start >= 0:
+            for marker in block_markers:
+                e = html.find(marker, idx + 50)
+                if e >= 0 and (card_end < 0 or e < card_end):
+                    card_end = e
+        if card_start >= 0 and card_end > card_start:
+            span = html[card_start:card_end]
+            if 800 <= len(span) <= 50000:
+                return span
 
-        # Prefer occurrences inside /rungtynes/<id> links
-        for mm in re.finditer(r"/rungtynes/%s" % re.escape(game_id), html, re.IGNORECASE):
-            indices.append(mm.start())
-            if len(indices) >= max_windows:
-                break
-
-        # Fallback: raw id
-        if not indices:
-            for mm in re.finditer(re.escape(game_id), html):
-                indices.append(mm.start())
-                if len(indices) >= max_windows:
-                    break
-
-        windows: List[str] = []
-        for idx in indices:
-            start = max(0, idx - size // 2)
-            end = min(len(html), idx + size // 2)
-            windows.append(html[start:end])
-
-        # At least one window
-        if not windows:
-            windows.append(html[:size])
-
-        return windows
-
-    def _parse_match_best(self, html: str, game_id: str) -> Dict[str, Any]:
-        """Try multiple candidate windows and return the best parsed match."""
-        best: Dict[str, Any] = {"game_id": game_id}
-        best_score = -1
-
-        for window in self._extract_match_windows(html, game_id):
-            parsed = self._parse_match_from_window(game_id, window)
-
-            score = 0
-            if parsed.get("start"):
-                score += 20
-            if parsed.get("home") or parsed.get("away"):
-                score += 5
-            if parsed.get("home_logo") or parsed.get("away_logo"):
-                score += 2
-            if parsed.get("tv"):
-                score += 1
-            if parsed.get("league"):
-                score += 1
-            if parsed.get("tickets_url"):
-                score += 1
-
-            if score > best_score:
-                best = parsed
-                best_score = score
-
-            # If we already have start + teams, good enough
-            if parsed.get("start") and (parsed.get("home") or parsed.get("away")):
-                best = parsed
-                break
-
-        return best
-
+        start = max(0, idx - size // 2)
+        end = min(len(html), idx + size // 2)
+        return html[start:end]
 
     def _parse_match_from_window(self, game_id: str, window: str) -> Dict[str, Any]:
         start_dt = _parse_start(window)
@@ -440,7 +446,6 @@ class ZalgirisMatchesCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
             "score_away": s2,
             "info_url": _parse_info_url(game_id, window),
             "tickets_url": _parse_tickets_url(window),
-            "is_live": _parse_live_flag(window),
         }
 
     async def _maybe_fetch_match_details(self, game: Dict[str, Any]) -> None:
@@ -465,14 +470,10 @@ class ZalgirisMatchesCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
             if k in ("score_home", "score_away") and parsed.get(k) is not None:
                 game[k] = parsed[k]
 
-        # live flag can change
-        game["is_live"] = bool(parsed.get("is_live")) or game.get("is_live", False)
-
-    def _classify(self) -> Tuple[Optional[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    def _classify(self) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         now = _now()
         upcoming: List[Dict[str, Any]] = []
         finished: List[Dict[str, Any]] = []
-        live: Optional[Dict[str, Any]] = None
 
         for g in self._games.values():
             start_iso = g.get("start")
@@ -480,12 +481,7 @@ class ZalgirisMatchesCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
             if not start_dt:
                 continue
 
-            is_live = bool(g.get("is_live", False))
             has_score = (g.get("score_home") is not None) and (g.get("score_away") is not None)
-
-            if is_live:
-                live = g
-                continue
 
             if start_dt > now:
                 upcoming.append(g)
@@ -494,12 +490,12 @@ class ZalgirisMatchesCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
                 if has_score or (start_dt > now - timedelta(hours=6)):
                     finished.append(g)
 
-        upcoming.sort(key=lambda x: dt_util.parse_datetime(x.get("start") or "") or (dt_util.utcnow() + timedelta(days=3650)))
-        finished.sort(key=lambda x: dt_util.parse_datetime(x.get("start") or "") or dt_util.utcnow(), reverse=True)
-        return live, upcoming, finished
+        upcoming.sort(key=lambda x: x.get("start") or "")
+        finished.sort(key=lambda x: x.get("start") or "", reverse=True)
+        return upcoming, finished
 
     async def _async_update_data(self) -> Dict[str, Any]:
-        # Update intervals (options can change live)
+        # Update interval (options can change)
         self.update_interval = timedelta(seconds=self._opt_scan_interval())
 
         team_path = self._opt_team_path()
@@ -509,11 +505,13 @@ class ZalgirisMatchesCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
         schedule_url = urljoin(BASE_URL, team_path)
 
         html = await self._fetch_text(schedule_url)
+        html = _normalize_html_for_parsing(html)
         game_ids, debug = self._parse_schedule(html)
 
         # Parse schedule matches
         for gid in game_ids:
-            parsed = self._parse_match_best(html, gid)
+            window = self._extract_match_window(html, gid)
+            parsed = self._parse_match_from_window(gid, window)
 
             # Merge into cache
             existing = self._games.get(gid, {})
@@ -529,45 +527,19 @@ class ZalgirisMatchesCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
 
             self._games[gid] = merged
 
-        live, upcoming, finished = self._classify()
+        upcoming, finished = self._classify()
 
-        # Opportunistically enrich the nearest upcoming game (low-frequency) so UI can show TV/arena/logos.
-        # Do this only if the game is soon and we haven't fetched details recently.
-        if upcoming:
-            try:
-                g0 = upcoming[0]
-                start0 = dt_util.parse_datetime(g0.get("start") or "")
-                if start0:
-                    soon = start0 - _now() <= timedelta(days=14)
-                    last_fetch = g0.get("_details_fetched_at")
-                    last_fetch_dt = dt_util.parse_datetime(last_fetch) if isinstance(last_fetch, str) else None
-                    stale = (last_fetch_dt is None) or (_now() - last_fetch_dt >= timedelta(hours=6))
-                    needs = (g0.get("arena") in (None, "", "—", "-")) or (g0.get("tv") in (None, "", "—", "-")) or (g0.get("home") is None) or (g0.get("away") is None)
-                    if soon and stale and needs:
-                        await self._maybe_fetch_match_details(g0)
-                        g0["_details_fetched_at"] = _serialize_dt(_now())
-            except Exception:  # pragma: no cover
-                pass
-
-        # If we have a live game or a just-started game, poll its match page more often
+        # Try to finalize score for the most recent started games (last 24h) if score is missing
         detail_tasks = []
-        live_interval = self._opt_live_scan_interval()
-
-        if live:
-            # Reduce to live interval; coordinator will still be triggered by HA, but we can refresh via sensor
-            self.update_interval = timedelta(seconds=live_interval)
-            detail_tasks.append(self._maybe_fetch_match_details(live))
-        else:
-            # Try to finalize score for the most recent started game (last 24h) if score missing
-            now = _now()
-            candidates = []
-            for g in finished[:3]:
-                start_dt = dt_util.parse_datetime(g.get("start")) if g.get("start") else None
-                if start_dt and start_dt > now - timedelta(hours=24):
-                    if g.get("score_home") is None or g.get("score_away") is None:
-                        candidates.append(g)
-            for g in candidates[:2]:
-                detail_tasks.append(self._maybe_fetch_match_details(g))
+        now = _now()
+        candidates = []
+        for g in finished[:3]:
+            start_dt = dt_util.parse_datetime(g.get("start")) if g.get("start") else None
+            if start_dt and start_dt > now - timedelta(hours=24):
+                if g.get("score_home") is None or g.get("score_away") is None:
+                    candidates.append(g)
+        for g in candidates[:2]:
+            detail_tasks.append(self._maybe_fetch_match_details(g))
 
         if detail_tasks:
             try:
@@ -576,25 +548,7 @@ class ZalgirisMatchesCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
                 _LOGGER.debug("Match details update failed: %s", err)
 
             # Re-classify after details update
-            live, upcoming, finished = self._classify()
-
-        # Opportunistically enrich the nearest upcoming game (low-frequency) so UI can show TV/arena/logos.
-        # Do this only if the game is soon and we haven't fetched details recently.
-        if upcoming:
-            try:
-                g0 = upcoming[0]
-                start0 = dt_util.parse_datetime(g0.get("start") or "")
-                if start0:
-                    soon = start0 - _now() <= timedelta(days=14)
-                    last_fetch = g0.get("_details_fetched_at")
-                    last_fetch_dt = dt_util.parse_datetime(last_fetch) if isinstance(last_fetch, str) else None
-                    stale = (last_fetch_dt is None) or (_now() - last_fetch_dt >= timedelta(hours=6))
-                    needs = (g0.get("arena") in (None, "", "—", "-")) or (g0.get("tv") in (None, "", "—", "-")) or (g0.get("home") is None) or (g0.get("away") is None)
-                    if soon and stale and needs:
-                        await self._maybe_fetch_match_details(g0)
-                        g0["_details_fetched_at"] = _serialize_dt(_now())
-            except Exception:  # pragma: no cover
-                pass
+            upcoming, finished = self._classify()
 
         # Save store occasionally (not every tick)
         try:
@@ -602,16 +556,11 @@ class ZalgirisMatchesCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
         except Exception as err:  # noqa: BLE001
             _LOGGER.debug("Store save failed: %s", err)
 
-        # Build "last finished with score"
-        last_with_score = next((g for g in finished if g.get("score_home") is not None and g.get("score_away") is not None), None)
-
         return {
             "team_path": team_path,
             "source_url": schedule_url,
             "fetched_at": _serialize_dt(_now()),
-            "live": live,
             "upcoming": upcoming,
             "finished": finished,
-            "last_finished_with_score": last_with_score,
             "debug": debug,
         }
