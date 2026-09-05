@@ -1,8 +1,20 @@
-# Zalgiris Matches (v2.0.5)
+# Zalgiris Matches (v2.0.6)
+
+## Adaptyvus atnaujinimas (2.0.6)
+
+- Tarp rungtynių: maždaug kas 2 valandas.
+- Likus iki 6 valandų: naudojamas `scan_interval` (numatyta 600 s).
+- Nuo 15 min. iki pradžios iki 4 val. po pradžios: 60–120 s pagal `scan_interval`, ne daugiau kaip 120 s.
+- Pridedamas iki 10 % atsitiktinis vėlavimas; atsižvelgiama į artėjančią greito tikrinimo ribą.
+- Gavus HTTP ar ryšio klaidą: pauzė nuo 5 min., pakartotinai dvigubinama iki 6 val. Gavus 403: bent 1 val.
+- `Retry-After` (sekundės arba HTTP data) yra minimali pauzė, net jei viršija 6 val. Papildomi rungtynių puslapiai tikrinami nuosekliai; gavus klaidą kiti nebetikrinami.
+- Pauzė galioja ir rankinėms užklausoms, ir integracijos perkrovimui toje pačioje HA sesijoje. Po viso HA paleidimo iš naujo pauzė nėra išsaugoma.
+
+`debug.next_poll_seconds` ir `debug.cooldown_seconds` rodo planuojamą intervalą bei pauzę paskutinio sėkmingai grąžinto atnaujinimo metu. Tai nėra nuolat mažėjantys skaitikliai. Greitas langas nustatomas pagal laiką, ne pagal patvirtintą „Live“ būseną.
 
 ## Duomenų ribojimai ir 2.0.5 pakeitimai
 
-Rezultatai atnaujinami integracijos nustatytu intervalu (numatyta 600 s, galima 60–3600 s), o ne realaus laiko srautu. Transliuotojas rodomas tik gavus duomenis iš šaltinio.
+Rezultatai atnaujinami pagal aukščiau aprašytą adaptyvią tvarką, o ne realaus laiko srautu. `scan_interval` nustatymas galioja artėjant rungtynėms; kitais laikotarpiais taikomos adaptyvios ribos. Transliuotojas rodomas tik gavus duomenis iš šaltinio.
 
 Integracija nepateikia patvirtinto `is_live` lauko. `finished` reiškia jau prasidėjusias rungtynes, nebūtinai baigtas. Korta 2.0.2 pirmas 3 valandas rodo „Prasidėjo pagal tvarkaraštį“, vėliau „Praėjusios rungtynės“. Tai laiko prielaida, ne patvirtinta būsena.
 
@@ -70,4 +82,4 @@ Papildomai root:
 
 ## Versija
 
-`manifest.json` versija: `2.0.5`
+`manifest.json` versija: `2.0.6`

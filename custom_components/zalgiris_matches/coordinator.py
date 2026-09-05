@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import html as html_lib
 import json
 import logging
@@ -30,6 +29,7 @@ from .const import (
     STORAGE_KEY,
     STORAGE_VERSION,
 )
+from .polling import PollingGate, next_interval
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -275,6 +275,8 @@ class ZalgirisMatchesCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
         self.hass = hass
         self.entry = entry
         self.session = async_get_clientsession(hass)
+        gates = hass.data.setdefault(f"{DOMAIN}_polling", {})
+        self._polling_gate = gates.setdefault(entry.entry_id, PollingGate())
 
         self._etag: Dict[str, str] = {}
         self._last_modified: Dict[str, str] = {}
@@ -343,12 +345,17 @@ class ZalgirisMatchesCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
         )
 
     async def _fetch_text(self, url: str) -> str:
+        remaining = self._polling_gate.remaining()
+        if remaining:
+            self.update_interval = timedelta(seconds=remaining)
+            raise UpdateFailed("Source cooldown is active")
         headers = {"User-Agent": "HomeAssistant-ZalgirisMatches/2.0"}
         if url in self._etag:
             headers["If-None-Match"] = self._etag[url]
         if url in self._last_modified:
             headers["If-Modified-Since"] = self._last_modified[url]
 
+        resp = None
         try:
             async with async_timeout.timeout(15):
                 resp = await self.session.get(url, headers=headers, allow_redirects=True)
@@ -367,7 +374,15 @@ class ZalgirisMatchesCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
                 self._last_text[url] = text
                 return text
         except Exception as err:  # noqa: BLE001
+            self._polling_gate.failed(
+                resp.headers.get("Retry-After") if resp is not None else None,
+                resp.status if resp is not None else None,
+            )
+            self.update_interval = timedelta(seconds=self._polling_gate.remaining())
             raise UpdateFailed(f"Fetch failed ({url}): {err}") from err
+        finally:
+            if resp is not None:
+                resp.release()
 
     def _parse_schedule(self, html: str) -> Tuple[List[str], Dict[str, Any]]:
         game_ids = []
@@ -498,7 +513,9 @@ class ZalgirisMatchesCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
 
     async def _async_update_data(self) -> Dict[str, Any]:
         # Update interval (options can change)
-        self.update_interval = timedelta(seconds=self._opt_scan_interval())
+        self.update_interval = timedelta(seconds=next_interval(
+            self._games.values(), self._opt_scan_interval()
+        ))
 
         team_path = self._opt_team_path()
         if not team_path.startswith("/"):
@@ -532,7 +549,6 @@ class ZalgirisMatchesCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
         upcoming, finished = self._classify()
 
         # Try to finalize score for the most recent started games (last 24h) if score is missing
-        detail_tasks = []
         now = _now()
         candidates = []
         for g in finished[:3]:
@@ -544,17 +560,22 @@ class ZalgirisMatchesCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
             needs_final_score = score_missing and start_dt > now - timedelta(hours=24)
             if recently_started or needs_final_score:
                 candidates.append(g)
+        details_ok = True
         for g in candidates[:2]:
-            detail_tasks.append(self._maybe_fetch_match_details(g))
-
-        if detail_tasks:
             try:
-                await asyncio.gather(*detail_tasks)
+                await self._maybe_fetch_match_details(g)
             except Exception as err:  # noqa: BLE001
+                details_ok = False
                 _LOGGER.debug("Match details update failed: %s", err)
+                break
 
-            # Re-classify after details update
-            upcoming, finished = self._classify()
+        upcoming, finished = self._classify()
+        if details_ok:
+            self._polling_gate.succeeded()
+        interval = next_interval(self._games.values(), self._opt_scan_interval())
+        self.update_interval = timedelta(seconds=max(interval, self._polling_gate.remaining()))
+        debug["next_poll_seconds"] = round(self.update_interval.total_seconds())
+        debug["cooldown_seconds"] = round(self._polling_gate.remaining())
 
         # Save store occasionally (not every tick)
         try:
