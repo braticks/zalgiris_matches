@@ -1,4 +1,4 @@
-# Zalgiris Matches (v2.0.3)
+# Zalgiris Matches (v2.0.4)
 
 Home Assistant custom integration, kuri sukuria 2 sensorius:
 - `schedule`
@@ -58,4 +58,4 @@ Papildomai root:
 
 ## Versija
 
-`manifest.json` versija: `2.0.3`
+`manifest.json` versija: `2.0.4`
