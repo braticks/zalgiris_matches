@@ -56,7 +56,7 @@ SCORE_RE = re.compile(r"tabular-nums[^>]*>\s*([^<]{1,3})\s*</p>", re.IGNORECASE)
 SCORE_ESC_RE = re.compile(r"tabular-nums\\\",\\\"children\\\":\\\"([^\\\"]{1,3})", re.IGNORECASE)
 
 TV_HTML_RE = re.compile(
-    r"Transliacijos\\s*</p>.{0,500}?<p[^>]*>\\s*([^<]{1,80})\\s*</p>",
+    r"Transliacijos\s*</p>.{0,500}?<p[^>]*>\s*([^<]{1,80})\s*</p>",
     re.IGNORECASE | re.DOTALL,
 )
 TV_ESC_RE = re.compile(r"Transliacijos\\\",\\\"children\\\":\\\"([^\\\"]{1,80})", re.IGNORECASE)
@@ -249,7 +249,7 @@ def _parse_tv(window: str) -> Optional[str]:
     # Next.js data may contain extra elements between the label and value.
     normalized = window.replace('\\\"', '"')
     match = re.search(
-        r'"children"\\s*:\\s*"Transliacijos".{0,1000}?"children"\\s*:\\s*"([^"<>]{1,80})"',
+        r'"children"\s*:\s*"Transliacijos".{0,1000}?"children"\s*:\s*"([^"<>]{1,80})"',
         normalized,
         re.IGNORECASE | re.DOTALL,
     )
