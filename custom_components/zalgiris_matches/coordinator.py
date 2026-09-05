@@ -55,8 +55,11 @@ IMG_ESC_RE = re.compile(r"\\\"src\\\":\\\"([^\\\"]+)\\\"[^}]+?\\\"alt\\\":\\\"([
 SCORE_RE = re.compile(r"tabular-nums[^>]*>\s*([^<]{1,3})\s*</p>", re.IGNORECASE)
 SCORE_ESC_RE = re.compile(r"tabular-nums\\\",\\\"children\\\":\\\"([^\\\"]{1,3})", re.IGNORECASE)
 
-TV_HTML_RE = re.compile(r"Transliacijos\s*</p>\s*<p[^>]*>([^<]{1,60})</p>", re.IGNORECASE)
-TV_ESC_RE = re.compile(r"Transliacijos\\\",\\\"children\\\":\\\"([^\\\"]{1,60})", re.IGNORECASE)
+TV_HTML_RE = re.compile(
+    r"Transliacijos\\s*</p>.{0,500}?<p[^>]*>\\s*([^<]{1,80})\\s*</p>",
+    re.IGNORECASE | re.DOTALL,
+)
+TV_ESC_RE = re.compile(r"Transliacijos\\\",\\\"children\\\":\\\"([^\\\"]{1,80})", re.IGNORECASE)
 LEAGUE_HTML_RE = re.compile(
     r'(?:data-tooltip="|text-2xs truncate">)(Eurolyga|LKL|KMT|Lietuvos Krep[^<"]*Lyga|Karaliaus Mindaugo Taur[^<"]*)',
     re.IGNORECASE,
@@ -237,9 +240,20 @@ def _parse_start(window: str) -> Optional[dt_util.dt.datetime]:
 def _parse_tv(window: str) -> Optional[str]:
     tv = _first_match(TV_HTML_RE, window)
     if tv:
-        return tv
+        return html_lib.unescape(tv).strip()
+
     tv = _first_match(TV_ESC_RE, window)
-    return tv
+    if tv:
+        return html_lib.unescape(tv).strip()
+
+    # Next.js data may contain extra elements between the label and value.
+    normalized = window.replace('\\\"', '"')
+    match = re.search(
+        r'"children"\\s*:\\s*"Transliacijos".{0,1000}?"children"\\s*:\\s*"([^"<>]{1,80})"',
+        normalized,
+        re.IGNORECASE | re.DOTALL,
+    )
+    return html_lib.unescape(match.group(1)).strip() if match else None
 
 
 def _parse_info_url(game_id: str, window: str) -> str:
@@ -456,7 +470,7 @@ class ZalgirisMatchesCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
 
         html = await self._fetch_text(url)
         # Re-use same parsing rules on the match page
-        window = html[:12000]
+        window = self._extract_match_window(html, game["game_id"], size=24000)
 
         # Update only missing / important fields
         parsed = self._parse_match_from_window(game["game_id"], window)
@@ -535,9 +549,13 @@ class ZalgirisMatchesCoordinator(DataUpdateCoordinator[Dict[str, Any]]):
         candidates = []
         for g in finished[:3]:
             start_dt = dt_util.parse_datetime(g.get("start")) if g.get("start") else None
-            if start_dt and start_dt > now - timedelta(hours=24):
-                if g.get("score_home") is None or g.get("score_away") is None:
-                    candidates.append(g)
+            if not start_dt:
+                continue
+            score_missing = g.get("score_home") is None or g.get("score_away") is None
+            recently_started = start_dt > now - timedelta(hours=4)
+            needs_final_score = score_missing and start_dt > now - timedelta(hours=24)
+            if recently_started or needs_final_score:
+                candidates.append(g)
         for g in candidates[:2]:
             detail_tasks.append(self._maybe_fetch_match_details(g))
 
