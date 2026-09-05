@@ -1,4 +1,16 @@
-# Zalgiris Matches (v2.0.4)
+# Zalgiris Matches (v2.0.5)
+
+## Duomenų ribojimai ir 2.0.5 pakeitimai
+
+Rezultatai atnaujinami integracijos nustatytu intervalu (numatyta 600 s, galima 60–3600 s), o ne realaus laiko srautu. Transliuotojas rodomas tik gavus duomenis iš šaltinio.
+
+Integracija nepateikia patvirtinto `is_live` lauko. `finished` reiškia jau prasidėjusias rungtynes, nebūtinai baigtas. Korta 2.0.2 pirmas 3 valandas rodo „Prasidėjo pagal tvarkaraštį“, vėliau „Praėjusios rungtynės“. Tai laiko prielaida, ne patvirtinta būsena.
+
+2.0.5 išsaugo lygiųjų rezultatus (taip pat 0:0), nemaišo HTML ir JSON kopijų, atnaujina HA nustatymų langą ir perkrauna integraciją pakeitus parinktis. Rekomenduojama kortos versija: 2.0.2 arba naujesnė.
+
+Versijos numeris kode savaime nesukuria GitHub Release. Paskelbtus leidimus žiūrėkite [Releases](https://github.com/braticks/zalgiris_matches/releases).
+
+Parserio testai: `python3 -m unittest discover -s tests -v`. Jie nepakeičia bandymo Home Assistant aplinkoje ir vykstant rungtynėms.
 
 Home Assistant custom integration, kuri sukuria 2 sensorius:
 - `schedule`
@@ -19,7 +31,7 @@ show_league: true
 
 ## Diegimas per HACS
 
-1. Įkelk šitą repo į GitHub (pvz. `https://github.com/braticks/zalgiris_matches`).
+1. Repozitorijos adresas: `https://github.com/braticks/zalgiris_matches`.
 2. Home Assistant -> HACS -> `Integrations` -> trys taškai -> `Custom repositories`.
 3. Įklijuok repo URL.
 4. Pasirink `Category: Integration`.
@@ -58,4 +70,4 @@ Papildomai root:
 
 ## Versija
 
-`manifest.json` versija: `2.0.4`
+`manifest.json` versija: `2.0.5`

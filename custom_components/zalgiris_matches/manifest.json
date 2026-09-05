@@ -1,11 +1,11 @@
 {
   "domain": "zalgiris_matches",
   "name": "Zalgiris Matches",
-  "version": "2.0.4",
+  "version": "2.0.5",
   "documentation": "https://github.com/braticks/zalgiris_matches",
   "issue_tracker": "https://github.com/braticks/zalgiris_matches/issues",
   "config_flow": true,
   "requirements": [],
-  "codeowners": [],
+  "codeowners": ["@braticks"],
   "iot_class": "cloud_polling"
 }

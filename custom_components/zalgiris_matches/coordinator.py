@@ -166,26 +166,14 @@ def _parse_teams_and_logos(window: str) -> Tuple[Optional[str], Optional[str], O
 
 
 def _parse_scores(window: str) -> Tuple[Optional[int], Optional[int]]:
-    raw: List[str] = []
-    raw.extend([x.strip() for x in SCORE_RE.findall(window)])
-    raw.extend([x.strip() for x in SCORE_ESC_RE.findall(window)])
-
-    # Deduplicate while keeping order
-    cleaned: List[str] = []
-    for r in raw:
-        if r not in cleaned:
-            cleaned.append(r)
-
-    nums: List[int] = []
-    for r in cleaned:
-        r2 = r.replace("\u00a0", " ").strip()
-        if r2.isdigit():
-            nums.append(int(r2))
-        if len(nums) >= 2:
-            break
-
-    if len(nums) >= 2:
-        return nums[0], nums[1]
+    # Preserve team positions and ties; never combine HTML and JSON copies.
+    for pattern in (SCORE_RE, SCORE_ESC_RE):
+        raw = pattern.findall(window)
+        if len(raw) < 2:
+            continue
+        pair = [value.replace("\u00a0", " ").strip() for value in raw[:2]]
+        if all(value.isdigit() for value in pair):
+            return int(pair[0]), int(pair[1])
     return None, None
 
 

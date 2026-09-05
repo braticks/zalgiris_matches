@@ -43,12 +43,10 @@ class ZalgirisMatchesConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
-        return ZalgirisMatchesOptionsFlow(config_entry)
+        return ZalgirisMatchesOptionsFlow()
 
 
-class ZalgirisMatchesOptionsFlow(config_entries.OptionsFlow):
-    def __init__(self, config_entry):
-        self.config_entry = config_entry
+class ZalgirisMatchesOptionsFlow(config_entries.OptionsFlowWithReload):
 
     async def async_step_init(self, user_input=None):
         if user_input is None:
