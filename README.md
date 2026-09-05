@@ -4,6 +4,19 @@ Home Assistant custom integration, kuri sukuria 2 sensorius:
 - `schedule`
 - `next`
 
+## Dashboard korta
+
+Šiai integracijai skirta atskira [Žalgiris Card](https://github.com/braticks/zalgiris-card) korta. Ji rodo artimiausias rungtynes, logotipus, turnyrą, transliuotoją, tiesioginį rezultatą ir artėjančių rungtynių sąrašą.
+
+Kortą per HACS pridėkite kaip `Dashboard` tipo pasirinktinę repozitoriją.
+
+```yaml
+type: custom:zalgiris-card
+entity: sensor.zalgiris_rungtyniu_sarasas
+count: 5
+show_league: true
+```
+
 ## Diegimas per HACS
 
 1. Įkelk šitą repo į GitHub (pvz. `https://github.com/braticks/zalgiris_matches`).
