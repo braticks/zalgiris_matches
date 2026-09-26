@@ -15,6 +15,21 @@ _LOGGER = logging.getLogger(__name__)
 SOFASCORE_TEAM_ID = 6662
 SOFASCORE_BASE_URL = "https://api.sofascore.com/api/v1"
 
+LIVE_POLL_SECONDS = 30
+PREGAME_POLL_SECONDS = 60
+POSTGAME_POLL_SECONDS = 300
+PREGAME_WINDOW = timedelta(minutes=30)
+GAME_WINDOW = timedelta(hours=4)
+BASE_REFRESH_DURING_GAME = timedelta(minutes=5)
+
+FINISHED_STATUSES = {
+    "finished",
+    "ended",
+    "canceled",
+    "cancelled",
+    "postponed",
+}
+
 
 def _event_score(event: Dict[str, Any], side: str) -> Optional[int]:
     score = event.get(f"{side}Score") or {}
@@ -52,6 +67,10 @@ def _matches_zalgiris(event: Dict[str, Any]) -> bool:
     return home_id == SOFASCORE_TEAM_ID or away_id == SOFASCORE_TEAM_ID
 
 
+def _status_finished(status: Any) -> bool:
+    return str(status or "").strip().lower() in FINISHED_STATUSES
+
+
 def _find_matching_event(game: Dict[str, Any], events: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     start_iso = game.get("start")
     start_dt = dt_util.parse_datetime(start_iso) if isinstance(start_iso, str) else None
@@ -77,6 +96,41 @@ def _find_matching_event(game: Dict[str, Any], events: List[Dict[str, Any]]) -> 
 
 class ZalgirisMatchesCoordinator(BaseZalgirisMatchesCoordinator):
     """Beta coordinator that enriches zalgiris.lt fixtures with SofaScore live scores."""
+
+    def __init__(self, hass, entry) -> None:
+        super().__init__(hass, entry)
+        self._last_base_refresh = None
+
+    def _match_window_active(self, now=None) -> bool:
+        now = now or dt_util.now()
+        for game in self._games.values():
+            start_iso = game.get("start")
+            start_dt = dt_util.parse_datetime(start_iso) if isinstance(start_iso, str) else None
+            if start_dt and start_dt - PREGAME_WINDOW <= now <= start_dt + GAME_WINDOW:
+                return True
+        return False
+
+    def _desired_poll_seconds(self, now=None) -> Optional[int]:
+        now = now or dt_util.now()
+        desired: Optional[int] = None
+
+        for game in self._games.values():
+            start_iso = game.get("start")
+            start_dt = dt_util.parse_datetime(start_iso) if isinstance(start_iso, str) else None
+            if not start_dt:
+                continue
+
+            if start_dt - PREGAME_WINDOW <= now < start_dt:
+                desired = PREGAME_POLL_SECONDS if desired is None else min(desired, PREGAME_POLL_SECONDS)
+                continue
+
+            if start_dt <= now <= start_dt + GAME_WINDOW:
+                if _status_finished(game.get("live_status")):
+                    desired = POSTGAME_POLL_SECONDS if desired is None else min(desired, POSTGAME_POLL_SECONDS)
+                else:
+                    desired = LIVE_POLL_SECONDS if desired is None else min(desired, LIVE_POLL_SECONDS)
+
+        return desired
 
     async def _fetch_sofascore_day(self, day: str) -> List[Dict[str, Any]]:
         url = f"{SOFASCORE_BASE_URL}/sport/basketball/scheduled-events/{day}"
@@ -111,7 +165,11 @@ class ZalgirisMatchesCoordinator(BaseZalgirisMatchesCoordinator):
         for game in self._games.values():
             start_iso = game.get("start")
             start_dt = dt_util.parse_datetime(start_iso) if isinstance(start_iso, str) else None
-            if start_dt and now - timedelta(hours=8) <= start_dt <= now + timedelta(hours=8):
+            if not start_dt:
+                continue
+            if _status_finished(game.get("live_status")):
+                continue
+            if start_dt - PREGAME_WINDOW <= now <= start_dt + GAME_WINDOW:
                 relevant.append(game)
 
         if not relevant:
@@ -169,7 +227,20 @@ class ZalgirisMatchesCoordinator(BaseZalgirisMatchesCoordinator):
         return updated
 
     async def _async_update_data(self) -> Dict[str, Any]:
-        data = await super()._async_update_data()
+        now = dt_util.now()
+        in_match_window = self._match_window_active(now)
+        refresh_base = (
+            self.data is None
+            or self._last_base_refresh is None
+            or not in_match_window
+            or now - self._last_base_refresh >= BASE_REFRESH_DURING_GAME
+        )
+
+        if refresh_base:
+            data = await super()._async_update_data()
+            self._last_base_refresh = now
+        else:
+            data = dict(self.data or {})
 
         try:
             updated = await self._refresh_sofascore()
@@ -182,4 +253,12 @@ class ZalgirisMatchesCoordinator(BaseZalgirisMatchesCoordinator):
         data["finished"] = finished
         data.setdefault("debug", {})["sofascore_matches_updated"] = updated
         data["debug"]["live_score_beta"] = True
+        data["debug"]["zalgiris_schedule_refreshed"] = refresh_base
+        data["debug"]["live_fetched_at"] = dt_util.now().isoformat()
+
+        desired = self._desired_poll_seconds()
+        if desired is not None:
+            self.update_interval = timedelta(seconds=desired)
+            data["debug"]["next_poll_seconds"] = desired
+
         return data
