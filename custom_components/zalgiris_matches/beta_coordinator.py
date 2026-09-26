@@ -9,6 +9,7 @@ import async_timeout
 from homeassistant.util import dt as dt_util
 
 from .coordinator import ZalgirisMatchesCoordinator as BaseZalgirisMatchesCoordinator
+from .standings import TOURNAMENTS, parse_team_standing, select_current_season
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -21,6 +22,7 @@ POSTGAME_POLL_SECONDS = 300
 PREGAME_WINDOW = timedelta(minutes=30)
 GAME_WINDOW = timedelta(hours=4)
 BASE_REFRESH_DURING_GAME = timedelta(minutes=5)
+STANDINGS_REFRESH = timedelta(hours=2)
 
 FINISHED_STATUSES = {
     "finished",
@@ -95,11 +97,13 @@ def _find_matching_event(game: Dict[str, Any], events: List[Dict[str, Any]]) -> 
 
 
 class ZalgirisMatchesCoordinator(BaseZalgirisMatchesCoordinator):
-    """Beta coordinator that enriches zalgiris.lt fixtures with SofaScore live scores."""
+    """Beta coordinator with SofaScore live scores and standings."""
 
     def __init__(self, hass, entry) -> None:
         super().__init__(hass, entry)
         self._last_base_refresh = None
+        self._last_standings_refresh = None
+        self._standings: Dict[str, Dict[str, Any]] = {}
 
     def _match_window_active(self, now=None) -> bool:
         now = now or dt_util.now()
@@ -132,8 +136,7 @@ class ZalgirisMatchesCoordinator(BaseZalgirisMatchesCoordinator):
 
         return desired
 
-    async def _fetch_sofascore_day(self, day: str) -> List[Dict[str, Any]]:
-        url = f"{SOFASCORE_BASE_URL}/sport/basketball/scheduled-events/{day}"
+    async def _fetch_json(self, url: str) -> Optional[Dict[str, Any]]:
         headers = {
             "User-Agent": (
                 "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -147,16 +150,19 @@ class ZalgirisMatchesCoordinator(BaseZalgirisMatchesCoordinator):
                 resp = await self.session.get(url, headers=headers, allow_redirects=True)
                 try:
                     if resp.status != 200:
-                        _LOGGER.debug("SofaScore returned HTTP %s", resp.status)
-                        return []
+                        _LOGGER.debug("SofaScore returned HTTP %s for %s", resp.status, url)
+                        return None
                     payload = await resp.json(content_type=None)
+                    return payload if isinstance(payload, dict) else None
                 finally:
                     resp.release()
         except Exception as err:  # noqa: BLE001
-            _LOGGER.debug("SofaScore beta fetch failed: %s", err)
-            return []
+            _LOGGER.debug("SofaScore beta fetch failed for %s: %s", url, err)
+            return None
 
-        events = payload.get("events", []) if isinstance(payload, dict) else []
+    async def _fetch_sofascore_day(self, day: str) -> List[Dict[str, Any]]:
+        payload = await self._fetch_json(f"{SOFASCORE_BASE_URL}/sport/basketball/scheduled-events/{day}")
+        events = payload.get("events", []) if payload else []
         return [event for event in events if isinstance(event, dict) and _matches_zalgiris(event)]
 
     async def _refresh_sofascore(self) -> int:
@@ -226,6 +232,45 @@ class ZalgirisMatchesCoordinator(BaseZalgirisMatchesCoordinator):
 
         return updated
 
+    async def _fetch_tournament_standing(self, key: str, tournament_id: int) -> Optional[Dict[str, Any]]:
+        seasons_payload = await self._fetch_json(
+            f"{SOFASCORE_BASE_URL}/unique-tournament/{tournament_id}/seasons"
+        )
+        if not seasons_payload:
+            return None
+
+        season = select_current_season(seasons_payload.get("seasons", []), dt_util.now())
+        if not season:
+            return None
+        season_id = season.get("id")
+        if season_id is None:
+            return None
+
+        standings_payload = await self._fetch_json(
+            f"{SOFASCORE_BASE_URL}/unique-tournament/{tournament_id}/season/{season_id}/standings/total"
+        )
+        standing = parse_team_standing(standings_payload) if standings_payload else None
+        if not standing:
+            return None
+
+        standing["tournament"] = TOURNAMENTS[key]["name"]
+        standing["tournament_id"] = tournament_id
+        standing["season"] = season.get("name") or season.get("year")
+        standing["season_id"] = season_id
+        standing["source"] = "SofaScore"
+        standing["updated_at"] = dt_util.now().isoformat()
+        return standing
+
+    async def _refresh_standings(self) -> int:
+        updated = 0
+        for key, tournament in TOURNAMENTS.items():
+            standing = await self._fetch_tournament_standing(key, int(tournament["id"]))
+            if standing:
+                self._standings[key] = standing
+                updated += 1
+        self._last_standings_refresh = dt_util.now()
+        return updated
+
     async def _async_update_data(self) -> Dict[str, Any]:
         now = dt_util.now()
         in_match_window = self._match_window_active(now)
@@ -248,10 +293,24 @@ class ZalgirisMatchesCoordinator(BaseZalgirisMatchesCoordinator):
             updated = 0
             _LOGGER.debug("SofaScore beta enrichment failed: %s", err)
 
+        standings_due = (
+            self._last_standings_refresh is None
+            or now - self._last_standings_refresh >= STANDINGS_REFRESH
+        )
+        standings_updated = 0
+        if standings_due:
+            try:
+                standings_updated = await self._refresh_standings()
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.debug("SofaScore standings refresh failed: %s", err)
+                self._last_standings_refresh = now
+
         upcoming, finished = self._classify()
         data["upcoming"] = upcoming
         data["finished"] = finished
+        data["standings"] = dict(self._standings)
         data.setdefault("debug", {})["sofascore_matches_updated"] = updated
+        data["debug"]["sofascore_standings_updated"] = standings_updated
         data["debug"]["live_score_beta"] = True
         data["debug"]["zalgiris_schedule_refreshed"] = refresh_base
         data["debug"]["live_fetched_at"] = dt_util.now().isoformat()
