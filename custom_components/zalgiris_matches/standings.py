@@ -49,6 +49,14 @@ def select_current_season(seasons: Iterable[Dict[str, Any]], now: datetime) -> O
     return None
 
 
+def latest_season(seasons: Iterable[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Return SofaScore's newest listed season (their API is newest-first)."""
+    for season in seasons:
+        if isinstance(season, dict) and season.get("id") is not None:
+            return season
+    return None
+
+
 def _find_team_row(node: Any, context: Optional[str] = None) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
     if isinstance(node, list):
         for item in node:
@@ -100,8 +108,9 @@ def parse_team_standing(payload: Any) -> Optional[Dict[str, Any]]:
         "percentage": row.get("percentage"),
         "points": row.get("points"),
         "games_behind": row.get("gamesBehind"),
-        "score_for": row.get("scoreFor"),
-        "score_against": row.get("scoreAgainst"),
+        "score_for": row.get("scoresFor", row.get("scoreFor")),
+        "score_against": row.get("scoresAgainst", row.get("scoreAgainst")),
         "stage": stage,
+        "status": "ok",
     }
     return {key: value for key, value in result.items() if value is not None}
