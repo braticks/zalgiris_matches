@@ -12,7 +12,9 @@ from homeassistant.util import dt as dt_util
 from .beta6_coordinator import ZalgirisMatchesCoordinator as Beta6Coordinator
 
 LKL_URL = "https://lkl.lt/"
-EUROLEAGUE_V1_STANDINGS = "https://api-live.euroleague.net/v1/standings?seasoncode=E2026"
+EUROLEAGUE_V1_STANDINGS = (
+    "https://api-live.euroleague.net/v1/standings?seasonCode=E2026&gameNumber=99"
+)
 
 
 def _strip_html(raw_html: str) -> str:
@@ -69,60 +71,89 @@ def _local_tag(tag: str) -> str:
     return tag.rsplit("}", 1)[-1].lower()
 
 
-def _first_number(values: Dict[str, str], keys: tuple[str, ...]) -> Optional[int]:
-    for key, value in values.items():
-        if any(token in key for token in keys):
-            match = re.search(r"-?\d+", value or "")
-            if match:
-                return int(match.group(0))
+def _xml_text(node: ET.Element, name: str) -> Optional[str]:
+    wanted = name.lower()
+    for child in node.iter():
+        if child is node:
+            continue
+        if _local_tag(child.tag) != wanted:
+            continue
+        value = (child.text or "").strip()
+        if value:
+            return value
     return None
 
 
+def _xml_int(node: ET.Element, name: str) -> Optional[int]:
+    value = _xml_text(node, name)
+    if value is None:
+        return None
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
 def _parse_euroleague_xml(raw_xml: str) -> Optional[Dict[str, Any]]:
-    """Best-effort parser for the official EuroLeague v1 standings XML."""
+    """Parse Žalgiris from the current EuroLeague regular-season table."""
     try:
         root = ET.fromstring(raw_xml)
     except ET.ParseError:
         return None
 
+    # The first <group> in the v1 feed is the regular-season standings table.
+    # Read only individual <team> rows. The previous parser scanned a parent
+    # element containing all teams, so duplicate XML tags were overwritten and
+    # Žalgiris could incorrectly inherit another club's ranking (e.g. 20th).
+    group: Optional[ET.Element] = None
     for elem in root.iter():
-        texts = [text.strip() for text in elem.itertext() if text and text.strip()]
-        joined = " ".join(texts)
-        if not re.search(r"\bzalgiris\b|\bžalgiris\b", joined, re.IGNORECASE):
+        if _local_tag(elem.tag) == "group":
+            group = elem
+            break
+
+    if group is None:
+        return None
+
+    for team_row in group.iter():
+        if _local_tag(team_row.tag) != "team":
             continue
 
-        values: Dict[str, str] = {}
-        for child in elem.iter():
-            if child is elem:
-                continue
-            text = (child.text or "").strip()
-            if text:
-                values[_local_tag(child.tag)] = text
-
-        position = _first_number(values, ("position", "rank", "pos"))
-        if position is None or not 1 <= position <= 30:
+        code = (_xml_text(team_row, "code") or "").strip().upper()
+        name = (_xml_text(team_row, "name") or "").strip()
+        if code != "ZAL" and not re.search(r"\b(?:zalgiris|žalgiris)\b", name, re.IGNORECASE):
             continue
+
+        position = _xml_int(team_row, "ranking")
+        if position is None or not 1 <= position <= 20:
+            return None
 
         result: Dict[str, Any] = {
             "position": position,
             "team": "Žalgiris",
+            "team_code": code or "ZAL",
             "tournament": "Eurolyga",
             "status": "ok",
             "source": "EuroLeague official API",
             "source_url": EUROLEAGUE_V1_STANDINGS,
             "updated_at": dt_util.now().isoformat(),
         }
-        wins = _first_number(values, ("won", "wins", "win"))
-        losses = _first_number(values, ("lost", "losses", "loss"))
-        games = _first_number(values, ("played", "games", "gp"))
+
+        games = _xml_int(team_row, "totalgames")
+        wins = _xml_int(team_row, "wins")
+        losses = _xml_int(team_row, "losses")
+        points_for = _xml_int(team_row, "ptsfavour")
+        points_against = _xml_int(team_row, "ptsagainst")
+
+        if games is not None:
+            result["matches"] = games
         if wins is not None:
             result["wins"] = wins
         if losses is not None:
             result["losses"] = losses
-        if games is not None:
-            result["matches"] = games
-        elif wins is not None and losses is not None:
-            result["matches"] = wins + losses
+        if points_for is not None:
+            result["score_for"] = points_for
+        if points_against is not None:
+            result["score_against"] = points_against
         return result
 
     return None
