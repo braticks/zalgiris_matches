@@ -13,7 +13,7 @@ from .coordinator import ZalgirisMatchesCoordinator as BaseZalgirisMatchesCoordi
 _LOGGER = logging.getLogger(__name__)
 
 SOFASCORE_TEAM_ID = 6662
-SOFASCORE_BASE_URL = "https://www.sofascore.com/api/v1"
+SOFASCORE_BASE_URL = "https://api.sofascore.com/api/v1"
 
 
 def _event_score(event: Dict[str, Any], side: str) -> Optional[int]:
