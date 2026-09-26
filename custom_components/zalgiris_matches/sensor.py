@@ -24,6 +24,14 @@ class SensorDescription:
 SENSORS = [
     SensorDescription("schedule", "Zalgiris - rungtyniu sarasas", None),
     SensorDescription("next", "Zalgiris - kitos rungtynes", SensorDeviceClass.TIMESTAMP),
+    SensorDescription("live_score", "Zalgiris - live rezultatas", None),
+    SensorDescription("zalgiris_score", "Zalgiris - taskai", None),
+    SensorDescription("opponent_score", "Zalgiris - varzovo taskai", None),
+    SensorDescription("opponent", "Zalgiris - varzovas", None),
+    SensorDescription("live_status", "Zalgiris - live busena", None),
+    SensorDescription("live_period", "Zalgiris - live kelinys", None),
+    SensorDescription("live_clock", "Zalgiris - live laikas", None),
+    SensorDescription("live_source", "Zalgiris - live saltinis", None),
 ]
 
 
@@ -46,12 +54,20 @@ class ZalgirisSensor(CoordinatorEntity[ZalgirisMatchesCoordinator], SensorEntity
         self._attr_device_class = desc.device_class
         self._attr_unique_id = f"{entry.entry_id}_{desc.key}"
 
+    def _live_game(self) -> Optional[Dict[str, Any]]:
+        data = self.coordinator.data or {}
+        games = (data.get("finished") or []) + (data.get("upcoming") or [])
+        with_live = [g for g in games if g.get("live_source")]
+        if not with_live:
+            return None
+        with_live.sort(key=lambda g: abs((dt_util.parse_datetime(g.get("start")) - dt_util.now()).total_seconds()) if g.get("start") and dt_util.parse_datetime(g.get("start")) else 10**12)
+        return with_live[0]
+
     @property
     def native_value(self):
         data = self.coordinator.data or {}
 
         if self.desc.key == "schedule":
-            # Show total matches we currently know about (upcoming + finished)
             return len(data.get("upcoming") or []) + len(data.get("finished") or [])
 
         if self.desc.key == "next":
@@ -59,6 +75,31 @@ class ZalgirisSensor(CoordinatorEntity[ZalgirisMatchesCoordinator], SensorEntity
             if not upcoming:
                 return None
             return dt_util.parse_datetime(upcoming[0].get("start"))
+
+        game = self._live_game()
+        if not game:
+            return None
+
+        if self.desc.key == "live_score":
+            zs = game.get("zalgiris_score")
+            os = game.get("opponent_score")
+            if zs is None or os is None:
+                return None
+            return f"{zs}:{os}"
+        if self.desc.key == "zalgiris_score":
+            return game.get("zalgiris_score")
+        if self.desc.key == "opponent_score":
+            return game.get("opponent_score")
+        if self.desc.key == "opponent":
+            return game.get("opponent")
+        if self.desc.key == "live_status":
+            return game.get("live_status")
+        if self.desc.key == "live_period":
+            return game.get("live_period")
+        if self.desc.key == "live_clock":
+            return game.get("live_clock")
+        if self.desc.key == "live_source":
+            return game.get("live_source")
 
         return None
 
@@ -80,4 +121,5 @@ class ZalgirisSensor(CoordinatorEntity[ZalgirisMatchesCoordinator], SensorEntity
             upcoming = data.get("upcoming") or []
             return upcoming[0] if upcoming else {}
 
-        return {}
+        game = self._live_game()
+        return game or {}
