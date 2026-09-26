@@ -135,6 +135,8 @@ class ZalgirisMatchesCoordinator(BaseZalgirisMatchesCoordinator):
 
             home = event.get("homeTeam") or {}
             away = event.get("awayTeam") or {}
+            home_id = home.get("id")
+            away_id = away.get("id")
             home_score = _event_score(event, "home")
             away_score = _event_score(event, "away")
 
@@ -150,6 +152,18 @@ class ZalgirisMatchesCoordinator(BaseZalgirisMatchesCoordinator):
             game["live_clock"] = _event_clock(event)
             game["sofascore_home"] = home.get("name")
             game["sofascore_away"] = away.get("name")
+            game["sofascore_home_id"] = home_id
+            game["sofascore_away_id"] = away_id
+
+            if home_id == SOFASCORE_TEAM_ID:
+                game["zalgiris_score"] = home_score
+                game["opponent_score"] = away_score
+                game["opponent"] = away.get("name")
+            elif away_id == SOFASCORE_TEAM_ID:
+                game["zalgiris_score"] = away_score
+                game["opponent_score"] = home_score
+                game["opponent"] = home.get("name")
+
             updated += 1
 
         return updated
