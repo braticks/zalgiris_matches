@@ -32,6 +32,9 @@ SENSORS = [
     SensorDescription("live_period", "Zalgiris - live kelinys", None),
     SensorDescription("live_clock", "Zalgiris - live laikas", None),
     SensorDescription("live_source", "Zalgiris - live saltinis", None),
+    SensorDescription("standing_euroleague", "Zalgiris - Eurolyga vieta", None),
+    SensorDescription("standing_lkl", "Zalgiris - LKL vieta", None),
+    SensorDescription("standing_kmt", "Zalgiris - KMT vieta", None),
 ]
 
 
@@ -60,8 +63,26 @@ class ZalgirisSensor(CoordinatorEntity[ZalgirisMatchesCoordinator], SensorEntity
         with_live = [g for g in games if g.get("live_source")]
         if not with_live:
             return None
-        with_live.sort(key=lambda g: abs((dt_util.parse_datetime(g.get("start")) - dt_util.now()).total_seconds()) if g.get("start") and dt_util.parse_datetime(g.get("start")) else 10**12)
+        with_live.sort(
+            key=lambda g: abs((dt_util.parse_datetime(g.get("start")) - dt_util.now()).total_seconds())
+            if g.get("start") and dt_util.parse_datetime(g.get("start"))
+            else 10**12
+        )
         return with_live[0]
+
+    def _standing(self) -> Dict[str, Any]:
+        data = self.coordinator.data or {}
+        key_map = {
+            "standing_euroleague": "euroleague",
+            "standing_lkl": "lkl",
+            "standing_kmt": "kmt",
+        }
+        standing_key = key_map.get(self.desc.key)
+        if not standing_key:
+            return {}
+        standings = data.get("standings") or {}
+        value = standings.get(standing_key) or {}
+        return value if isinstance(value, dict) else {}
 
     @property
     def native_value(self):
@@ -75,6 +96,10 @@ class ZalgirisSensor(CoordinatorEntity[ZalgirisMatchesCoordinator], SensorEntity
             if not upcoming:
                 return None
             return dt_util.parse_datetime(upcoming[0].get("start"))
+
+        if self.desc.key.startswith("standing_"):
+            standing = self._standing()
+            return standing.get("position") or standing.get("stage")
 
         game = self._live_game()
         if not game:
@@ -114,12 +139,16 @@ class ZalgirisSensor(CoordinatorEntity[ZalgirisMatchesCoordinator], SensorEntity
                 "fetched_at": data.get("fetched_at"),
                 "upcoming": data.get("upcoming"),
                 "finished": data.get("finished"),
+                "standings": data.get("standings"),
                 "debug": data.get("debug"),
             }
 
         if self.desc.key == "next":
             upcoming = data.get("upcoming") or []
             return upcoming[0] if upcoming else {}
+
+        if self.desc.key.startswith("standing_"):
+            return self._standing()
 
         game = self._live_game()
         return game or {}
