@@ -7,9 +7,17 @@ from homeassistant.util import dt as dt_util
 
 from .beta11_coordinator import ZalgirisMatchesCoordinator as Beta11Coordinator
 from .beta7_coordinator import _strip_html
-from .beta9_coordinator import GAME_WINDOW, PREGAME_WINDOW, _status_finished
+from .beta9_coordinator import (
+    EUROLEAGUE_PBP_URL,
+    EUROLEAGUE_SEASON,
+    GAME_WINDOW,
+    PREGAME_WINDOW,
+    _status_finished,
+    _to_int,
+)
 
 LKL_LIVE_URL = "https://lkl.lt/"
+EUROLEAGUE_LIVE_POLL_SECONDS = 10
 
 TEAM_ALIASES = {
     "žalgiris": ["ŽAL", "ZAL", "Žalgiris"],
@@ -134,8 +142,83 @@ def _parse_current_lkl_live(raw_html: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def _parse_euroleague_live(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Extract EuroLeague score plus the newest available event clock."""
+    period_keys = [
+        ("FirstQuarter", "Q1"),
+        ("SecondQuarter", "Q2"),
+        ("ThirdQuarter", "Q3"),
+        ("ForthQuarter", "Q4"),
+        ("ExtraTime", "OT"),
+    ]
+
+    events_with_period: List[tuple[int, str, Dict[str, Any]]] = []
+    for key, label in period_keys:
+        events = payload.get(key)
+        if not isinstance(events, list):
+            continue
+        for event in events:
+            if not isinstance(event, dict):
+                continue
+            sequence = _to_int(event.get("NUMBEROFPLAY")) or 0
+            events_with_period.append((sequence, label, event))
+
+    if not events_with_period:
+        return None
+
+    # Running score is only populated on scoring plays, so use the latest
+    # scoring event for points.
+    scored: List[tuple[int, Dict[str, Any], int, int]] = []
+    for sequence, _label, event in events_with_period:
+        score_a = _to_int(event.get("POINTS_A"))
+        score_b = _to_int(event.get("POINTS_B"))
+        if score_a is not None and score_b is not None:
+            scored.append((sequence, event, score_a, score_b))
+
+    if not scored:
+        return None
+
+    _score_sequence, _score_event, score_a, score_b = max(scored, key=lambda item: item[0])
+
+    # Clock must come from the latest event, not from the latest scoring event.
+    # The old code made the clock appear badly delayed whenever several
+    # rebounds/fouls/misses happened after the last basket.
+    clock: Optional[str] = None
+    latest_period: Optional[str] = None
+    for _sequence, label, event in sorted(events_with_period, key=lambda item: item[0], reverse=True):
+        marker = str(event.get("MARKERTIME") or "").strip()
+        if marker:
+            clock = marker
+            latest_period = label
+            break
+
+    actual_quarter = _to_int(payload.get("ActualQuarter"))
+    if actual_quarter is not None:
+        if 1 <= actual_quarter <= 4:
+            period = f"Q{actual_quarter}"
+        elif actual_quarter >= 5:
+            period = "OT" if actual_quarter == 5 else f"OT{actual_quarter - 4}"
+        else:
+            period = latest_period
+    else:
+        period = latest_period
+
+    return {
+        "score_a": score_a,
+        "score_b": score_b,
+        "status": "inprogress" if bool(payload.get("Live")) else "finished",
+        "period": period,
+        "clock": clock,
+        "team_a": payload.get("TeamA"),
+        "team_b": payload.get("TeamB"),
+        "code_a": payload.get("CodeTeamA"),
+        "code_b": payload.get("CodeTeamB"),
+        "source": "EuroLeague",
+    }
+
+
 class ZalgirisMatchesCoordinator(Beta11Coordinator):
-    """Beta coordinator with corrected LKL live source and team validation."""
+    """Beta coordinator with corrected official live feeds."""
 
     def __init__(self, hass, entry) -> None:
         super().__init__(hass, entry)
@@ -195,6 +278,24 @@ class ZalgirisMatchesCoordinator(Beta11Coordinator):
             source=live["source"],
         )
 
+    def _desired_poll_seconds(self, now=None) -> Optional[int]:
+        """Poll EuroLeague faster while a game is active."""
+        now = now or dt_util.now()
+        desired = super()._desired_poll_seconds(now)
+
+        for game in self._games.values():
+            league = str(game.get("league") or "").lower()
+            if "euro" not in league:
+                continue
+            start_raw = game.get("start")
+            start_dt = dt_util.parse_datetime(start_raw) if isinstance(start_raw, str) else None
+            if not start_dt:
+                continue
+            if start_dt <= now <= start_dt + GAME_WINDOW and not _status_finished(game.get("live_status")):
+                return min(desired or EUROLEAGUE_LIVE_POLL_SECONDS, EUROLEAGUE_LIVE_POLL_SECONDS)
+
+        return desired
+
     async def _update_lkl_games(self, games: List[Dict[str, Any]], now) -> int:
         if not games:
             return 0
@@ -218,6 +319,33 @@ class ZalgirisMatchesCoordinator(Beta11Coordinator):
             game["is_live"] = parsed["status"] == "inprogress"
             updated += 1
         return updated
+
+    async def _update_euroleague_game(self, game: Dict[str, Any]) -> int:
+        gamecode = await self._euroleague_gamecode(game)
+        if gamecode is None:
+            return 0
+
+        url = f"{EUROLEAGUE_PBP_URL}?gamecode={gamecode}&seasoncode={EUROLEAGUE_SEASON}"
+        payload = await self._fetch_live_json("euroleague_pbp", url)
+        if not payload:
+            return 0
+
+        parsed = _parse_euroleague_live(payload)
+        if not parsed:
+            return 0
+
+        self._apply_scores(
+            game,
+            parsed["score_a"],
+            parsed["score_b"],
+            status=parsed["status"],
+            source="EuroLeague",
+            period=parsed.get("period"),
+            clock=parsed.get("clock"),
+        )
+        game["euroleague_gamecode"] = gamecode
+        game["live_clock_source"] = "latest_event"
+        return 1
 
     async def _refresh_sofascore(self) -> int:
         """Compatibility hook: refresh live scores from official sources only."""
@@ -281,4 +409,6 @@ class ZalgirisMatchesCoordinator(Beta11Coordinator):
         debug["lkl_live_source"] = LKL_LIVE_URL
         debug["team_validation"] = True
         debug["lkl_live_repair"] = dict(self._lkl_live_repair)
+        debug["euroleague_live_poll_seconds"] = EUROLEAGUE_LIVE_POLL_SECONDS
+        debug["euroleague_clock_source"] = "latest_event"
         return data
