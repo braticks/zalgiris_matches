@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
@@ -133,22 +134,29 @@ class ZalgirisSensor(CoordinatorEntity[ZalgirisMatchesCoordinator], SensorEntity
         data = self.coordinator.data or {}
 
         if self.desc.key == "schedule":
+            # Important: coordinator mutates game dictionaries in-place during
+            # fast live refreshes. Home Assistant keeps the previous State
+            # attributes for equality comparison. Returning the same nested
+            # list/dict objects can therefore make an attribute-only live
+            # change look unchanged to the frontend. Deep-copying creates a
+            # real snapshot on every write so Lovelace receives state_changed
+            # for score/period/clock updates as well.
             return {
                 "team_path": data.get("team_path"),
                 "source_url": data.get("source_url"),
                 "fetched_at": data.get("fetched_at"),
-                "upcoming": data.get("upcoming"),
-                "finished": data.get("finished"),
-                "standings": data.get("standings"),
-                "debug": data.get("debug"),
+                "upcoming": deepcopy(data.get("upcoming")),
+                "finished": deepcopy(data.get("finished")),
+                "standings": deepcopy(data.get("standings")),
+                "debug": deepcopy(data.get("debug")),
             }
 
         if self.desc.key == "next":
             upcoming = data.get("upcoming") or []
-            return upcoming[0] if upcoming else {}
+            return deepcopy(upcoming[0]) if upcoming else {}
 
         if self.desc.key.startswith("standing_"):
-            return self._standing()
+            return deepcopy(self._standing())
 
         game = self._live_game()
-        return game or {}
+        return deepcopy(game) if game else {}
