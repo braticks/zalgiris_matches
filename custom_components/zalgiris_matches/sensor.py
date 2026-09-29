@@ -30,8 +30,14 @@ SENSORS = [
     SensorDescription("opponent_score", "Zalgiris - varzovo taskai", None),
     SensorDescription("opponent", "Zalgiris - varzovas", None),
     SensorDescription("live_status", "Zalgiris - live busena", None),
+    SensorDescription("live_state", "Zalgiris - zaidimo busena", None),
     SensorDescription("live_period", "Zalgiris - live kelinys", None),
     SensorDescription("live_clock", "Zalgiris - live laikas", None),
+    SensorDescription("live_clock_seconds", "Zalgiris - live laikas sekundemis", None),
+    SensorDescription("break_type", "Zalgiris - pertraukos tipas", None),
+    SensorDescription("break_clock", "Zalgiris - pertraukos laikas", None),
+    SensorDescription("break_clock_seconds", "Zalgiris - pertraukos sekundes", None),
+    SensorDescription("clock_source", "Zalgiris - laikrodzio saltinis", None),
     SensorDescription("live_source", "Zalgiris - live saltinis", None),
     SensorDescription("standing_euroleague", "Zalgiris - Eurolyga vieta", None),
     SensorDescription("standing_lkl", "Zalgiris - LKL vieta", None),
@@ -120,10 +126,22 @@ class ZalgirisSensor(CoordinatorEntity[ZalgirisMatchesCoordinator], SensorEntity
             return game.get("opponent")
         if self.desc.key == "live_status":
             return game.get("live_status")
+        if self.desc.key == "live_state":
+            return game.get("live_state")
         if self.desc.key == "live_period":
             return game.get("live_period")
         if self.desc.key == "live_clock":
             return game.get("live_clock")
+        if self.desc.key == "live_clock_seconds":
+            return game.get("live_clock_seconds")
+        if self.desc.key == "break_type":
+            return game.get("break_type")
+        if self.desc.key == "break_clock":
+            return game.get("break_clock")
+        if self.desc.key == "break_clock_seconds":
+            return game.get("break_clock_seconds")
+        if self.desc.key == "clock_source":
+            return game.get("clock_source")
         if self.desc.key == "live_source":
             return game.get("live_source")
 
