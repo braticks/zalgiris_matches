@@ -5,7 +5,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 
 from .const import DOMAIN
-from .beta12_coordinator import ZalgirisMatchesCoordinator
+from .live_clock_coordinator import ZalgirisMatchesCoordinator
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
