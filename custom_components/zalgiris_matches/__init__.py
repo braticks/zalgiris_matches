@@ -1,15 +1,25 @@
 from __future__ import annotations
 
+import logging
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
 
 from .const import DOMAIN
+from .frontend import async_register_frontend
 from .live_clock_coordinator import ZalgirisMatchesCoordinator
+
+_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the integration (YAML is not used)."""
+    try:
+        await async_register_frontend(hass)
+    except Exception:  # noqa: BLE001
+        # A frontend problem must not prevent match sensors from loading.
+        _LOGGER.exception("Could not register bundled Žalgiris card")
     return True
 
 
