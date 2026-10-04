@@ -11,6 +11,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
+from .live_selection import select_live_game
 from .const import DOMAIN
 from .coordinator import ZalgirisMatchesCoordinator
 
@@ -67,15 +68,7 @@ class ZalgirisSensor(CoordinatorEntity[ZalgirisMatchesCoordinator], SensorEntity
     def _live_game(self) -> Optional[Dict[str, Any]]:
         data = self.coordinator.data or {}
         games = (data.get("finished") or []) + (data.get("upcoming") or [])
-        with_live = [g for g in games if g.get("live_source")]
-        if not with_live:
-            return None
-        with_live.sort(
-            key=lambda g: abs((dt_util.parse_datetime(g.get("start")) - dt_util.now()).total_seconds())
-            if g.get("start") and dt_util.parse_datetime(g.get("start"))
-            else 10**12
-        )
-        return with_live[0]
+        return select_live_game(games, dt_util.now())
 
     def _standing(self) -> Dict[str, Any]:
         data = self.coordinator.data or {}
@@ -178,3 +171,4 @@ class ZalgirisSensor(CoordinatorEntity[ZalgirisMatchesCoordinator], SensorEntity
 
         game = self._live_game()
         return deepcopy(game) if game else {}
+

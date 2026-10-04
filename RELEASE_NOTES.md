@@ -1,10 +1,10 @@
-# 2.1.0-beta.4
+# 2.1.0-beta.5
 
-- Pataisytas LKL rezultato nuskaitymas: tikrinama data ir abi komandos vienoje rungtynių eilutėje. Gretimų rungtynių rezultatai nebebus priskiriami Žalgiriui.
-- Atkuriamas atnaujinimas rungtynėms, kurias ankstesnė beta klaidingai pažymėjo baigtomis. Nepatvirtinti seni LKL rezultatai išvalomi.
-- LKL rungtynių identifikatorius išsaugomas kartu su patikrinta data. Rungtynių komandos nebeperrašomos pagal nesusietą „GYVAI“ bloką.
-- LKL kėlinio ir laikrodžio duomenys šiame pataisyme nepridėti; jų pagrindinio puslapio rezultatų blokas nepateikia.
+- Rungtynių dieną rezultatų sensoriai pasirenka tos dienos rungtynes, net jei tiesioginis šaltinis dar nepateikia duomenų.
+- Iki pirmo patvirtinto rezultato rodoma `0:0` ir tos dienos varžovas. Būsena: `scheduled` iki pradžios, `waiting` po pradžios, kol laukiama rezultato.
+- `score_pending: true` atskiria laikiną `0:0` nuo tikro rezultato. Seni kėlinio, laikrodžio ir pertraukos atributai nerodomi.
+- Gavus patvirtintą rezultatą rodomi tikrieji taškai, įskaitant galutinį rezultatą. Istoriniai duomenys neperrašomi.
+- Diena nustatoma pagal Home Assistant laiko juostą; pasirinkimas perskaičiuojamas atnaujinant sensorių.
+- Įtraukti beta.4 LKL rungtynių atpažinimo pataisymai. LKL laikrodžio palaikymas dar nepridėtas.
 
-Patikra: 20 automatinių testų, įskaitant 8 LKL regresijos testus ir 2026-10-04 oficialaus puslapio rezultatų bloko pavyzdį. Tikroje Home Assistant aplinkoje dar nepatikrinta.
-
-Leidimui: žyma `v2.1.0-beta.4`, šaka `beta-live-score`, pažymėti „Pre-release“. Atnaujinus per HACS perkrauti Home Assistant.
+Leidimui: `v2.1.0-beta.5`, šaka `beta-live-score`, „Pre-release“. Atnaujinus perkrauti Home Assistant.
