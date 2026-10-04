@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from html.parser import HTMLParser
 from typing import Any, Dict, List, Optional
 
 from homeassistant.util import dt as dt_util
@@ -88,58 +89,87 @@ def _alias_pattern(team: str) -> str:
     return "(?:" + "|".join(re.escape(a) for a in aliases) + ")"
 
 
+class _LklRows(HTMLParser):
+    """Keep each scoreboard row isolated, including its preceding date label."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.rows = []
+        self.context = ""
+        self.depth = 0
+        self.row = None
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict(attrs)
+        if tag == "div":
+            if self.depth:
+                self.depth += 1
+            elif "battle-row" in attrs.get("class", "").split():
+                self.depth = 1
+                self.row = {"text": "", "teams": [], "id": None,
+                            "date_context": self.context[-300:]}
+        if not self.depth:
+            return
+        if tag == "img" and attrs.get("alt"):
+            self.row["teams"].append(attrs["alt"])
+        if tag == "a":
+            match = re.search(r"/rungtynes/(\d+)(?:[/?#]|$)", attrs.get("href", ""))
+            if match:
+                self.row["id"] = match.group(1)
+
+    def handle_endtag(self, tag):
+        if tag == "div" and self.depth:
+            self.depth -= 1
+            if not self.depth:
+                self.rows.append(self.row)
+                self.row = None
+
+    def handle_data(self, data):
+        if self.depth:
+            self.row["text"] += " " + data
+        else:
+            self.context = (self.context + " " + data)[-600:]
+
+
+def _lkl_rows(raw_html):
+    parser = _LklRows()
+    parser.feed(raw_html)
+    return parser.rows
+
+
 def _parse_lkl_homepage_score(raw_html: str, game: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Parse a known current game from the official LKL homepage scoreboard."""
-    home = str(game.get("home") or "").strip()
-    away = str(game.get("away") or "").strip()
-    if not home or not away:
+    """Require the same date and ordered teams inside one scoreboard row."""
+    start = dt_util.parse_datetime(game.get("start") or "")
+    if not start or not game.get("home") or not game.get("away"):
         return None
-
-    text = _strip_html(raw_html)
-    home_pat = _alias_pattern(home)
-    away_pat = _alias_pattern(away)
-    pattern = re.compile(
-        rf"{home_pat}.{{0,100}}?(\d{{1,3}})\s*-\s*(\d{{1,3}})(.{{0,100}}?){away_pat}",
-        re.IGNORECASE,
-    )
-
-    candidates = list(pattern.finditer(text))
-    if not candidates:
-        return None
-
-    match = next((m for m in candidates if "gyvai" in m.group(3).lower()), candidates[0])
-    return {
-        "score_home": int(match.group(1)),
-        "score_away": int(match.group(2)),
-        "status": "inprogress" if "gyvai" in match.group(3).lower() else "finished",
-        "source": "LKL.lt",
-    }
-
-
-def _parse_current_lkl_live(raw_html: str) -> Optional[Dict[str, Any]]:
-    """Parse Žalgiris live block without relying on cached team names."""
-    text = _strip_html(raw_html)
-    pattern = re.compile(
-        r"\b([A-ZĄČĘĖĮŠŲŪŽ]{2,4})\s+(\d{1,3})\s*-\s*(\d{1,3})\s*GYVAI\s*[●•]?\s*([A-ZĄČĘĖĮŠŲŪŽ]{2,4})\b",
-        re.IGNORECASE,
-    )
-
-    for match in pattern.finditer(text):
-        home_code = match.group(1).upper()
-        away_code = match.group(4).upper()
-        if home_code not in {"ZAL", "ŽAL"} and away_code not in {"ZAL", "ŽAL"}:
+    months = ("sausio", "vasario", "kovo", "balandžio", "gegužės", "birželio",
+              "liepos", "rugpjūčio", "rugsėjo", "spalio", "lapkričio", "gruodžio")
+    candidates = []
+    for row in _lkl_rows(raw_html):
+        if not row["id"] or len(row["teams"]) != 2:
             continue
-        return {
-            "home_code": home_code,
-            "away_code": away_code,
-            "home": TEAM_CODE_TO_NAME.get(home_code, home_code),
-            "away": TEAM_CODE_TO_NAME.get(away_code, away_code),
-            "score_home": int(match.group(2)),
-            "score_away": int(match.group(3)),
-            "status": "inprogress",
-            "source": "LKL.lt",
-        }
-    return None
+        dates = list(re.finditer(
+            r"(" + "|".join(months) + r")\s+(\d{1,2})\s*d\.",
+            row["date_context"], re.IGNORECASE))
+        if not dates:
+            continue
+        date = dates[-1]
+        if months.index(date.group(1).lower()) + 1 != start.month or int(date.group(2)) != start.day:
+            continue
+        if not all(re.fullmatch(_alias_pattern(game[side]), team, re.IGNORECASE)
+                   for side, team in zip(("home", "away"), row["teams"])):
+            continue
+        score = re.search(r"(?<!\d)(\d{1,3})\s*-\s*(\d{1,3})(?!\d)", row["text"])
+        if not score:
+            continue
+        candidates.append({
+            "score_home": int(score.group(1)), "score_away": int(score.group(2)),
+            "status": "inprogress" if "gyvai" in row["text"].lower() else "finished",
+            "source": "LKL.lt", "source_game_id": row["id"],
+            "source_date": start.date().isoformat(),
+        })
+    # Conflicting rows are safer to reject than to guess.
+    return candidates[0] if candidates and all(c == candidates[0] for c in candidates) else None
 
 
 def _parse_euroleague_live(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -309,6 +339,8 @@ class ZalgirisMatchesCoordinator(Beta11Coordinator):
             parsed = _parse_lkl_homepage_score(raw_html, game)
             if not parsed:
                 continue
+            game["lkl_game_id"] = parsed["source_game_id"]
+            game["lkl_game_date"] = parsed["source_date"]
             self._apply_scores(
                 game,
                 parsed["score_home"],
@@ -354,9 +386,19 @@ class ZalgirisMatchesCoordinator(Beta11Coordinator):
         for game in self._games.values():
             start_raw = game.get("start")
             start_dt = dt_util.parse_datetime(start_raw) if isinstance(start_raw, str) else None
-            if not start_dt or _status_finished(game.get("live_status")):
+            if not start_dt:
+                continue
+            domestic = "euro" not in str(game.get("league") or "").lower()
+            if _status_finished(game.get("live_status")) and not domestic:
                 continue
             if start_dt - PREGAME_WINDOW <= now <= start_dt + GAME_WINDOW:
+                # Beta versions could persist scores from an unrelated row and
+                # then stop polling forever after setting status=finished.
+                if domestic and game.get("live_source") == "LKL.lt" and not game.get("lkl_game_id"):
+                    for key in ("score_home", "score_away", "zalgiris_score", "opponent_score",
+                                "live_status", "live_period", "live_clock", "live_source"):
+                        game[key] = None
+                    game["is_live"] = False
                 relevant.append(game)
 
         if not relevant:
@@ -364,37 +406,10 @@ class ZalgirisMatchesCoordinator(Beta11Coordinator):
             return 0
 
         updated = 0
-        repaired_game: Optional[Dict[str, Any]] = None
-
-        # First inspect the official LKL live block independently from cached
-        # team/league fields. This repairs old bad cache such as Google Play /
-        # App Store and an incorrectly parsed EuroLeague label.
-        raw_html = await self._fetch_live_text("lkl_live", LKL_LIVE_URL)
-        live = _parse_current_lkl_live(raw_html) if raw_html else None
-        if live:
-            repaired_game = min(
-                relevant,
-                key=lambda g: abs(
-                    (dt_util.parse_datetime(g.get("start")) - now).total_seconds()
-                    if g.get("start") and dt_util.parse_datetime(g.get("start"))
-                    else 10**12
-                ),
-            )
-            self._repair_game_from_live_block(repaired_game, live)
-            updated += 1
-            self._lkl_live_repair = {
-                "found": True,
-                "game_id": repaired_game.get("game_id"),
-                "home": live["home"],
-                "away": live["away"],
-                "score": f"{live['score_home']}:{live['score_away']}",
-            }
-        else:
-            self._lkl_live_repair = {"found": False, "reason": "live_block_not_found"}
-
-        remaining = [g for g in relevant if g is not repaired_game]
-        euro_games = [g for g in remaining if "euro" in str(g.get("league") or "").lower()]
-        domestic_games = [g for g in remaining if g not in euro_games]
+        # Never overwrite a cached fixture's identity from an unrelated live row.
+        euro_games = [g for g in relevant if "euro" in str(g.get("league") or "").lower()]
+        domestic_games = [g for g in relevant if g not in euro_games]
+        self._lkl_live_repair = {"mode": "date_and_ordered_teams"}
 
         if domestic_games:
             updated += await self._update_lkl_games(domestic_games, now)
@@ -412,3 +427,4 @@ class ZalgirisMatchesCoordinator(Beta11Coordinator):
         debug["euroleague_live_poll_seconds"] = EUROLEAGUE_LIVE_POLL_SECONDS
         debug["euroleague_clock_source"] = "latest_event"
         return data
+
