@@ -257,6 +257,17 @@ class ZalgirisMatchesCoordinator(Beta11Coordinator):
     def _parse_match_from_window(self, game_id: str, window: str) -> Dict[str, Any]:
         parsed = super()._parse_match_from_window(game_id, window)
 
+        # A temporary 0:0 on the schedule/details page is not a real reset.
+        # Preserve the last score of this same game while it is in progress.
+        previous = self._games.get(game_id) or {}
+        if (
+            parsed.get("score_home") == 0
+            and parsed.get("score_away") == 0
+            and ((previous.get("score_home") or 0) > 0 or (previous.get("score_away") or 0) > 0)
+        ):
+            parsed["score_home"] = None
+            parsed["score_away"] = None
+
         # Do not let footer/app icons overwrite a known game while zalgiris.lt
         # changes its card markup during live matches.
         if not _valid_team_pair(parsed.get("home"), parsed.get("away")):
@@ -338,6 +349,13 @@ class ZalgirisMatchesCoordinator(Beta11Coordinator):
         for game in games:
             parsed = _parse_lkl_homepage_score(raw_html, game)
             if not parsed:
+                continue
+            # LKL.lt occasionally serves a 0:0 placeholder during a live game.
+            if (
+                parsed["score_home"] == 0
+                and parsed["score_away"] == 0
+                and ((game.get("score_home") or 0) > 0 or (game.get("score_away") or 0) > 0)
+            ):
                 continue
             game["lkl_game_id"] = parsed["source_game_id"]
             game["lkl_game_date"] = parsed["source_date"]
