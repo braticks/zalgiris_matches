@@ -1,0 +1,30 @@
+name: Publish Žalgiris beta.6
+
+on:
+  push:
+    branches:
+      - beta-live-score
+    paths:
+      - .github/workflows/publish-beta-6.yml
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh release view v2.1.0-beta.6 >/dev/null 2>&1; then
+            echo "Release already exists."
+            exit 0
+          fi
+          gh release create v2.1.0-beta.6 \
+            --target "${{ github.sha }}" \
+            --prerelease \
+            --title "v2.1.0-beta.6" \
+            --notes "Fix temporary 0:0 live result resets during ongoing Žalgiris games. Keep the last valid score when LKL.lt or the schedule briefly returns 0:0; show 0:0 normally before tip-off."
