@@ -258,6 +258,14 @@ class ZalgirisMatchesCoordinator(Beta7Coordinator):
         period: Optional[str] = None,
         clock: Optional[str] = None,
     ) -> None:
+        # The live source can briefly return 0:0 for a game already in progress.
+        # Keep the last known real score for this fixture instead of resetting it.
+        if home_score == 0 and away_score == 0 and (
+            (game.get("score_home") or 0) > 0
+            or (game.get("score_away") or 0) > 0
+        ):
+            return
+
         game["score_home"] = home_score
         game["score_away"] = away_score
         game["live_source"] = source
